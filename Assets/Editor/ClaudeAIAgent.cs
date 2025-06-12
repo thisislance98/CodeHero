@@ -155,7 +155,7 @@ public class ClaudeToolProperty
 
 public class ClaudeAIAgent
 {
-    private static readonly string API_KEY = "YOUR_CLAUDE_API_KEY_HERE"; // Replace with your actual Claude AI API key
+    private static readonly string API_KEY = GetApiKey();
     private static readonly string API_URL = "https://api.anthropic.com/v1/messages";
     
     private static HttpClient httpClient = new HttpClient();
@@ -164,6 +164,42 @@ public class ClaudeAIAgent
     {
         httpClient.DefaultRequestHeaders.Add("x-api-key", API_KEY);
         httpClient.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
+    }
+    
+    private static string GetApiKey()
+    {
+        // First try to get from environment variable
+        string apiKey = Environment.GetEnvironmentVariable("CLAUDE_API_KEY");
+        
+        if (!string.IsNullOrEmpty(apiKey))
+        {
+            return apiKey;
+        }
+        
+        // Fallback to config file that won't be committed to repo
+        string configPath = Path.Combine(Application.dataPath, "Editor", "claude_config.txt");
+        if (File.Exists(configPath))
+        {
+            try
+            {
+                string key = File.ReadAllText(configPath).Trim();
+                if (!string.IsNullOrEmpty(key))
+                {
+                    return key;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[ClaudeAI] Error reading config file: {ex.Message}");
+            }
+        }
+        
+        // If no config found, provide helpful instructions
+        Debug.LogError("[ClaudeAI] No API key found! Please either:\n" +
+                      "1. Set CLAUDE_API_KEY environment variable, OR\n" +
+                      "2. Create Assets/Editor/claude_config.txt with your API key");
+        
+        return "YOUR_CLAUDE_API_KEY_HERE";
     }
     
     public static async Task<string> SendMessageAsync(string userMessage, List<ClaudeMessage> conversationHistory = null, bool isErrorFix = false)

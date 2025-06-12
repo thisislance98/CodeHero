@@ -71,6 +71,8 @@ Thumbs.db
 *.secret
 config.json
 secrets.json
+# Claude AI config file
+Assets/Editor/claude_config.txt
 
 # IDE specific files
 .vscode/
