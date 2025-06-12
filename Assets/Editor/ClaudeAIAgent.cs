@@ -87,6 +87,10 @@ public class ClaudeContentBlock
     
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public string content = null;
+    
+    // For streaming support
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public string partial_input = null;
 }
 
 [System.Serializable]
@@ -96,18 +100,21 @@ public class ClaudeSystemMessage
     public string text;
 }
 
-[System.Serializable]
-public class ClaudeRequest
-{
-    public string model = "claude-sonnet-4-20250514";
-    public int max_tokens = 4096;
-    
-    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-    public List<ClaudeSystemMessage> system;
-    
-    public List<ClaudeMessage> messages;
-    public List<ClaudeTool> tools;
-}
+    [System.Serializable]
+    public class ClaudeRequest
+    {
+        public string model = "claude-sonnet-4-20250514";
+        public int max_tokens = 8192; // Increased for Claude Sonnet 4
+        
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public List<ClaudeSystemMessage> system;
+        
+        public List<ClaudeMessage> messages;
+        public List<ClaudeTool> tools;
+        
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public bool? stream;
+    }
 
 [System.Serializable]
 public class ClaudeResponse
@@ -204,210 +211,453 @@ public class ClaudeAIAgent
     
     public static async Task<string> SendMessageAsync(string userMessage, List<ClaudeMessage> conversationHistory = null, bool isErrorFix = false)
     {
+        return await SendMessageInternalAsync(userMessage, conversationHistory, isErrorFix, false, null);
+    }
+
+    public static async Task<string> SendMessageStreamAsync(string userMessage, List<ClaudeMessage> conversationHistory = null, bool isErrorFix = false, System.Action<string> onTextDelta = null)
+    {
+        return await SendMessageInternalAsync(userMessage, conversationHistory, isErrorFix, true, onTextDelta);
+    }
+
+    private static async Task<string> SendMessageInternalAsync(string userMessage, List<ClaudeMessage> conversationHistory = null, bool isErrorFix = false, bool stream = false, System.Action<string> onTextDelta = null)
+    {
+        if (string.IsNullOrEmpty(API_KEY))
+        {
+            throw new System.Exception("Claude API key not found. Please set CLAUDE_API_KEY environment variable or create claude_config.txt file.");
+        }
+
         try
         {
-            var messages = new List<ClaudeMessage>();
-            var systemMessages = new List<ClaudeSystemMessage>();
-            
-            // Set system prompt for error fixing if this is an error fix request
-            if (isErrorFix)
-            {
-                systemMessages.Add(new ClaudeSystemMessage
-                {
-                    text = @"You are a Unity C# error fixing assistant. When analyzing Unity console errors:
-
-1. IDENTIFY the root cause of the error from the error message and stack trace
-2. USE the read_script tool to examine the problematic script if needed  
-3. PROVIDE a corrected version using the edit_script tool
-4. EXPLAIN what was wrong and how you fixed it
-
-Focus on common Unity C# issues like:
-- Missing semicolons, brackets, or parentheses
-- Incorrect variable declarations or types
-- Missing using statements
-- Incorrect method signatures
-- MonoBehaviour lifecycle issues
-- Component reference problems
-
-Always attempt to fix the error automatically using the available tools. Be concise but thorough in your explanations."
-                });
-            }
-            
-            // Add conversation history
+            // Copy conversation history and add user message
+            List<ClaudeMessage> messages = new List<ClaudeMessage>();
             if (conversationHistory != null)
             {
-                // Filter out any system messages from conversation history and add them to systemMessages
-                foreach (var msg in conversationHistory)
+                messages.AddRange(conversationHistory);
+            }
+            messages.Add(ClaudeMessage.CreateTextMessage("user", userMessage));
+
+            // Create request with optional streaming
+            var request = new ClaudeRequest
+            {
+                model = "claude-sonnet-4-20250514",
+                max_tokens = 4096,
+                messages = messages,
+                tools = GetUnityTools()
+            };
+
+            // Add system message for error fixing
+            if (isErrorFix)
+            {
+                request.system = new List<ClaudeSystemMessage>
                 {
-                    if (msg.role == "system")
+                    new ClaudeSystemMessage
                     {
-                        // Convert old format to new format if needed
-                        if (msg.content != null && msg.content.Count > 0)
-                        {
-                            systemMessages.Add(new ClaudeSystemMessage { text = msg.content[0].text });
-                        }
+                        text = "You are a Unity C# expert helping fix compilation errors. When you receive error reports, analyze them carefully and use the available tools to read and edit scripts to fix the issues. Always provide clear explanations of what was wrong and how you fixed it."
                     }
-                    else
-                    {
-                        messages.Add(msg);
-                    }
+                };
+            }
+
+            var jsonSettings = new JsonSerializerSettings
+            {
+                NullValueHandling = NullValueHandling.Ignore,
+                ContractResolver = new ClaudeContentBlockContractResolver()
+            };
+
+            string jsonRequest = JsonConvert.SerializeObject(request, jsonSettings);
+            var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
+
+            if (stream)
+            {
+                return await HandleStreamingResponse(content, onTextDelta);
+            }
+            else
+            {
+                return await HandleNonStreamingResponse(content);
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            Debug.LogError($"[ClaudeAI] HTTP Error: {ex.Message}");
+            throw new System.Exception($"Network error: {ex.Message}");
+        }
+        catch (TaskCanceledException ex)
+        {
+            Debug.LogError($"[ClaudeAI] Request timed out: {ex.Message}");
+            throw new System.Exception("Request timed out. Please try again.");
+        }
+        catch (JsonException ex)
+        {
+            Debug.LogError($"[ClaudeAI] JSON parsing error: {ex.Message}");
+            throw new System.Exception($"Error parsing response: {ex.Message}");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"[ClaudeAI] Unexpected error: {ex.Message}\nStack trace: {ex.StackTrace}");
+            throw;
+        }
+    }
+
+    private static async Task<string> HandleNonStreamingResponse(StringContent content)
+    {
+        var response = await httpClient.PostAsync(API_URL, content);
+        var responseContent = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Debug.LogError($"[ClaudeAI] API Error {response.StatusCode}: {responseContent}");
+            throw new System.Exception($"Claude API error: {response.StatusCode} - {responseContent}");
+        }
+
+        var claudeResponse = JsonConvert.DeserializeObject<ClaudeResponse>(responseContent);
+        return await ProcessClaudeResponse(claudeResponse);
+    }
+
+    private static async Task<string> ProcessClaudeResponse(ClaudeResponse claudeResponse)
+    {
+        if (claudeResponse?.content == null)
+        {
+            Debug.LogError("[ClaudeAI] Failed to deserialize API response or no content!");
+            return "Error: Could not parse API response";
+        }
+
+        var finalResponse = new StringBuilder();
+        var toolUses = new List<ClaudeToolUse>();
+
+        // Process content blocks
+        foreach (var contentBlock in claudeResponse.content)
+        {
+            if (contentBlock.type == "text" && !string.IsNullOrEmpty(contentBlock.text))
+            {
+                finalResponse.AppendLine(contentBlock.text);
+            }
+            else if (contentBlock.type == "tool_use")
+            {
+                toolUses.Add(new ClaudeToolUse
+                {
+                    id = contentBlock.id,
+                    name = contentBlock.name,
+                    input = contentBlock.input
+                });
+            }
+        }
+
+        // Execute any tools that were requested
+        if (toolUses.Count > 0)
+        {
+            foreach (var toolUse in toolUses)
+            {
+                try
+                {
+                    var result = await ExecuteToolAsync(toolUse);
+                    finalResponse.AppendLine();
+                    finalResponse.AppendLine($"[Tool Executed: {toolUse.name}]");
+                    finalResponse.AppendLine(result);
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogError($"[ClaudeAI] Tool execution failed: {ex.Message}");
+                    finalResponse.AppendLine($"Error executing {toolUse.name}: {ex.Message}");
                 }
             }
-            
-            // Add initial user message
-            messages.Add(ClaudeMessage.CreateTextMessage("user", userMessage));
-            
-            // Start conversation loop
-            var finalResponse = new StringBuilder();
-            var maxIterations = 10; // Prevent infinite loops
-            var iteration = 0;
-            
-            while (iteration < maxIterations)
+        }
+
+        return finalResponse.ToString().Trim();
+    }
+
+    private static async Task<string> HandleStreamingResponse(StringContent content, System.Action<string> onTextDelta)
+    {
+        // Add streaming header
+        var request = new HttpRequestMessage(HttpMethod.Post, API_URL)
+        {
+            Content = content
+        };
+        
+        // Modify the request to include streaming
+        var requestBody = await content.ReadAsStringAsync();
+        var requestData = JsonConvert.DeserializeObject<ClaudeRequest>(requestBody);
+        requestData.stream = true;
+        
+        var streamContent = new StringContent(JsonConvert.SerializeObject(requestData), Encoding.UTF8, "application/json");
+        request.Content = streamContent;
+
+        var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            Debug.LogError($"[ClaudeAI] API Error {response.StatusCode}: {errorContent}");
+            throw new System.Exception($"Claude API error: {response.StatusCode} - {errorContent}");
+        }
+
+        return await ProcessStreamingResponse(response, onTextDelta);
+    }
+
+    private static async Task<string> ProcessStreamingResponse(HttpResponseMessage response, System.Action<string> onTextDelta)
+    {
+        var fullResponse = new StringBuilder();
+        var contentBlocks = new List<ClaudeContentBlock>();
+        var toolUses = new List<ClaudeToolUse>();
+        var stopReason = "";
+        
+        using (var stream = await response.Content.ReadAsStreamAsync())
+        using (var reader = new System.IO.StreamReader(stream))
+        {
+            string line;
+            while ((line = await reader.ReadLineAsync()) != null)
             {
-                iteration++;
-                Debug.Log($"[ClaudeAI] Conversation iteration {iteration}");
+                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
+                    continue;
+
+                var data = line.Substring(6); // Remove "data: " prefix
                 
-                var request = new ClaudeRequest
-                {
-                    messages = messages,
-                    tools = GetUnityTools()
-                };
-                
-                // Only set system if we have system messages
-                if (systemMessages.Count > 0)
-                {
-                    request.system = systemMessages;
-                }
-                
-                // Configure JSON serializer to properly ignore null values and empty strings
-                var settings = new JsonSerializerSettings
-                {
-                    NullValueHandling = NullValueHandling.Ignore,
-                    DefaultValueHandling = DefaultValueHandling.Ignore,
-                    Formatting = Formatting.Indented,
-                    ContractResolver = new ClaudeContentBlockContractResolver()
-                };
-                
-                var json = JsonConvert.SerializeObject(request, settings);
-                Debug.Log($"[ClaudeAI] Sending API Request (iteration {iteration}): {json}");
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                
-                var response = await httpClient.PostAsync(API_URL, content);
-                var responseContent = await response.Content.ReadAsStringAsync();
-                
-                Debug.Log($"[ClaudeAI] Full API Response (iteration {iteration}): {responseContent}");
-                
-                if (!response.IsSuccessStatusCode)
-                {
-                    Debug.LogError($"[ClaudeAI] API Error: {response.StatusCode} - {responseContent}");
-                    return $"Error: {response.StatusCode} - {responseContent}";
-                }
-                
-                var claudeResponse = JsonConvert.DeserializeObject<ClaudeResponse>(responseContent);
-                
-                if (claudeResponse?.content == null)
-                {
-                    Debug.LogError("[ClaudeAI] Failed to deserialize API response or no content!");
-                    return "Error: Could not parse API response";
-                }
-                
-                // Check if Claude wants to use tools
-                var toolUseItems = claudeResponse.content.Where(c => c.type == "tool_use").ToList();
-                var textItems = claudeResponse.content.Where(c => c.type == "text").ToList();
-                
-                // Add text responses to final output
-                foreach (var textItem in textItems)
-                {
-                    if (!string.IsNullOrEmpty(textItem.text))
-                    {
-                        finalResponse.AppendLine(textItem.text);
-                    }
-                }
-                
-                // If no tool use, we're done
-                if (toolUseItems.Count == 0)
-                {
-                    Debug.Log($"[ClaudeAI] No tool use detected, conversation complete after {iteration} iterations");
+                if (data == "[DONE]")
                     break;
-                }
-                
-                // Add Claude's response (including tool use) to conversation
-                // Create clean content blocks to avoid API field conflicts
-                var cleanContent = new List<ClaudeContentBlock>();
-                foreach (var block in claudeResponse.content)
+
+                try
                 {
-                    var cleanBlock = new ClaudeContentBlock { type = block.type };
+                    var eventData = JsonConvert.DeserializeObject<StreamEvent>(data);
                     
-                    if (block.type == "text")
+                    switch (eventData.type)
                     {
-                        cleanBlock.text = block.text;
+                        case "message_start":
+                            Debug.Log("[ClaudeAI] Stream started");
+                            break;
+                            
+                        case "content_block_start":
+                            var blockStart = JsonConvert.DeserializeObject<ContentBlockStartEvent>(data);
+                            contentBlocks.Add(blockStart.content_block);
+                            Debug.Log($"[ClaudeAI] Content block started: {blockStart.content_block.type}");
+                            break;
+                            
+                        case "content_block_delta":
+                            var delta = JsonConvert.DeserializeObject<ContentBlockDeltaEvent>(data);
+                            await ProcessContentBlockDelta(delta, contentBlocks, toolUses, onTextDelta, fullResponse);
+                            break;
+                            
+                        case "content_block_stop":
+                            Debug.Log("[ClaudeAI] Content block stopped");
+                            break;
+                            
+                        case "message_delta":
+                            var messageDelta = JsonConvert.DeserializeObject<MessageDeltaEvent>(data);
+                            if (messageDelta.delta?.stop_reason != null)
+                            {
+                                stopReason = messageDelta.delta.stop_reason;
+                                Debug.Log($"[ClaudeAI] Stop reason: {stopReason}");
+                            }
+                            break;
+                            
+                        case "message_stop":
+                            Debug.Log("[ClaudeAI] Stream ended");
+                            break;
+                            
+                        case "ping":
+                            // Ignore ping events
+                            break;
+                            
+                        case "error":
+                            var errorData = JsonConvert.DeserializeObject<StreamErrorEvent>(data);
+                            throw new System.Exception($"Stream error: {errorData.error.message}");
                     }
-                    else if (block.type == "tool_use")
-                    {
-                        cleanBlock.id = block.id;
-                        cleanBlock.name = block.name;
-                        cleanBlock.input = block.input;
-                    }
-                    
-                    cleanContent.Add(cleanBlock);
                 }
-                
-                var assistantMessage = new ClaudeMessage
+                catch (JsonException ex)
                 {
-                    role = "assistant",
-                    content = cleanContent
-                };
-                messages.Add(assistantMessage);
+                    Debug.LogWarning($"[ClaudeAI] Failed to parse stream event: {ex.Message}");
+                    continue;
+                }
+            }
+        }
+
+        // Process any tool uses that were collected and return updated response
+        return await ProcessToolUsesAndContinueConversation(toolUses, fullResponse.ToString(), stopReason, onTextDelta);
+    }
+
+    private static async Task<string> ProcessToolUsesAndContinueConversation(List<ClaudeToolUse> toolUses, string currentResponse, string stopReason, System.Action<string> onTextDelta)
+    {
+        var finalResponse = new StringBuilder(currentResponse);
+        
+        // If no tool uses, return the current response
+        if (toolUses.Count == 0 || stopReason != "tool_use")
+        {
+            return finalResponse.ToString();
+        }
+
+        // Execute tools and build conversation history for continuation
+        var conversationMessages = new List<ClaudeMessage>();
+        
+        // Add Claude's response with tool use
+        var assistantContent = new List<ClaudeContentBlock>();
+        if (!string.IsNullOrEmpty(currentResponse.Trim()))
+        {
+            assistantContent.Add(new ClaudeContentBlock { type = "text", text = currentResponse });
+        }
+        
+        foreach (var toolUse in toolUses)
+        {
+            assistantContent.Add(new ClaudeContentBlock 
+            { 
+                type = "tool_use", 
+                id = toolUse.id, 
+                name = toolUse.name, 
+                input = toolUse.input 
+            });
+        }
+        
+        conversationMessages.Add(new ClaudeMessage 
+        { 
+            role = "assistant", 
+            content = assistantContent 
+        });
+
+        // Execute tools and add results to conversation
+        foreach (var toolUse in toolUses)
+        {
+            try
+            {
+                var result = await ExecuteToolAsync(toolUse);
+                Debug.Log($"[ClaudeAI] Tool executed: {toolUse.name} -> {result.Substring(0, Math.Min(100, result.Length))}...");
                 
-                // Execute tools and add results
-                foreach (var toolUseItem in toolUseItems)
+                conversationMessages.Add(ClaudeMessage.CreateToolResultMessage(toolUse.id, result));
+                
+                // Add tool result info to final response for user visibility
+                finalResponse.AppendLine();
+                finalResponse.AppendLine($"Tool Results:");
+                finalResponse.AppendLine(result);
+                
+                // Notify UI of tool execution progress
+                onTextDelta?.Invoke($"\n[Tool Executed: {toolUse.name}]\n");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[ClaudeAI] Tool execution failed: {ex.Message}");
+                var errorResult = $"Error executing tool: {ex.Message}";
+                conversationMessages.Add(ClaudeMessage.CreateToolResultMessage(toolUse.id, errorResult));
+                
+                finalResponse.AppendLine();
+                finalResponse.AppendLine($"Tool Error: {errorResult}");
+            }
+        }
+
+        // Continue conversation to get Claude's follow-up response
+        try
+        {
+            Debug.Log("[ClaudeAI] Continuing conversation after tool execution...");
+            var followUpResponse = await SendContinuationStreamAsync(conversationMessages, onTextDelta);
+            
+            if (!string.IsNullOrEmpty(followUpResponse))
+            {
+                finalResponse.AppendLine();
+                finalResponse.Append(followUpResponse);
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"[ClaudeAI] Error in conversation continuation: {ex.Message}");
+            finalResponse.AppendLine();
+            finalResponse.AppendLine($"Error continuing conversation: {ex.Message}");
+        }
+
+        return finalResponse.ToString();
+    }
+
+    private static async Task<string> SendContinuationStreamAsync(List<ClaudeMessage> conversationMessages, System.Action<string> onTextDelta)
+    {
+        var request = new ClaudeRequest
+        {
+            model = "claude-sonnet-4-20250514",
+            max_tokens = 8192,
+            messages = conversationMessages,
+            tools = GetUnityTools(),
+            stream = true
+        };
+
+        var jsonSettings = new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Ignore,
+            ContractResolver = new ClaudeContentBlockContractResolver()
+        };
+
+        string jsonRequest = JsonConvert.SerializeObject(request, jsonSettings);
+        var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
+
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, API_URL)
+        {
+            Content = content
+        };
+
+        var response = await httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            Debug.LogError($"[ClaudeAI] Continuation API Error {response.StatusCode}: {errorContent}");
+            throw new System.Exception($"Claude API error: {response.StatusCode} - {errorContent}");
+        }
+
+        return await ProcessStreamingResponse(response, onTextDelta);
+    }
+
+    private static async Task ProcessContentBlockDelta(ContentBlockDeltaEvent delta, List<ClaudeContentBlock> contentBlocks, List<ClaudeToolUse> toolUses, System.Action<string> onTextDelta, StringBuilder fullResponse)
+    {
+        if (delta.index >= contentBlocks.Count)
+        {
+            Debug.LogWarning($"[ClaudeAI] Delta index {delta.index} out of range for content blocks");
+            return;
+        }
+
+        var contentBlock = contentBlocks[delta.index];
+
+        switch (delta.delta.type)
+        {
+            case "text_delta":
+                var textDelta = delta.delta.text;
+                if (!string.IsNullOrEmpty(textDelta))
                 {
+                    fullResponse.Append(textDelta);
+                    onTextDelta?.Invoke(textDelta);
+                }
+                break;
+
+            case "input_json_delta":
+                // Accumulate tool input JSON
+                if (contentBlock.type == "tool_use")
+                {
+                    if (contentBlock.partial_input == null)
+                        contentBlock.partial_input = "";
+                    
+                    contentBlock.partial_input += delta.delta.partial_json;
+                    
+                    // Try to parse complete JSON
                     try
                     {
-                        var toolUse = new ClaudeToolUse
+                        var input = JsonConvert.DeserializeObject(contentBlock.partial_input);
+                        if (input != null)
                         {
-                            id = toolUseItem.id,
-                            name = toolUseItem.name,
-                            input = toolUseItem.input
-                        };
-                        
-                        Debug.Log($"[ClaudeAI] Executing tool: {toolUse.name} with ID: {toolUse.id}");
-                        
-                        var toolResult = await ExecuteToolAsync(toolUse);
-                        Debug.Log($"[ClaudeAI] Tool result: {toolResult}");
-                        
-                        // Add tool result to conversation
-                        var toolResultMessage = ClaudeMessage.CreateToolResultMessage(toolUse.id, toolResult);
-                        messages.Add(toolResultMessage);
-                        
-                        // Also add to final response for user visibility
-                        finalResponse.AppendLine($"[Tool Executed: {toolUse.name}]");
-                        finalResponse.AppendLine(toolResult);
+                            var toolUse = new ClaudeToolUse
+                            {
+                                id = contentBlock.id,
+                                name = contentBlock.name,
+                                input = input
+                            };
+                            
+                            // Check if we already have this tool use
+                            var existingIndex = toolUses.FindIndex(t => t.id == toolUse.id);
+                            if (existingIndex >= 0)
+                            {
+                                toolUses[existingIndex] = toolUse;
+                            }
+                            else
+                            {
+                                toolUses.Add(toolUse);
+                            }
+                        }
                     }
-                    catch (Exception ex)
+                    catch (JsonException)
                     {
-                        Debug.LogError($"[ClaudeAI] Error executing tool: {ex.Message}");
-                        var errorMessage = ClaudeMessage.CreateToolResultMessage(
-                            toolUseItem.id, 
-                            $"Error executing tool: {ex.Message}"
-                        );
-                        messages.Add(errorMessage);
+                        // JSON not complete yet, continue accumulating
                     }
                 }
-            }
-            
-            if (iteration >= maxIterations)
-            {
-                Debug.LogWarning($"[ClaudeAI] Conversation loop terminated after {maxIterations} iterations to prevent infinite loop");
-                finalResponse.AppendLine($"\n[Note: Conversation terminated after {maxIterations} iterations]");
-            }
-            
-            return finalResponse.ToString().Trim();
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"[ClaudeAI] Exception in SendMessageAsync: {ex.Message}\nStack trace: {ex.StackTrace}");
-            return $"Error: {ex.Message}";
+                break;
         }
     }
     
@@ -1017,4 +1267,62 @@ public class ClaudeContentBlockContractResolver : Newtonsoft.Json.Serialization.
         
         return property;
     }
+}
+
+// New streaming-related classes
+[System.Serializable]
+public class StreamEvent
+{
+    public string type;
+}
+
+[System.Serializable]
+public class ContentBlockStartEvent : StreamEvent
+{
+    public int index;
+    public ClaudeContentBlock content_block;
+}
+
+[System.Serializable]
+public class ContentBlockDeltaEvent : StreamEvent
+{
+    public int index;
+    public StreamDelta delta;
+}
+
+[System.Serializable]
+public class MessageDeltaEvent : StreamEvent
+{
+    public MessageDelta delta;
+}
+
+[System.Serializable]
+public class StreamErrorEvent : StreamEvent
+{
+    public StreamError error;
+}
+
+[System.Serializable]
+public class StreamDelta
+{
+    public string type;
+    
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public string text;
+    
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public string partial_json;
+}
+
+[System.Serializable]
+public class MessageDelta
+{
+    public string stop_reason;
+}
+
+[System.Serializable]
+public class StreamError
+{
+    public string type;
+    public string message;
 }

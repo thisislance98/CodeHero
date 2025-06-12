@@ -16,8 +16,10 @@ public class ChatWindow : EditorWindow
     private bool aiEnabled = true;
     private bool isWaitingForAI = false;
     
-    // Message tracking for robust removal
-    private ChatMessage currentThinkingMessage = null;
+    // Unified message streaming system
+    private Queue<MessageQueueEntry> messageQueue = new Queue<MessageQueueEntry>();
+    private ChatMessage currentlyStreamingMessage = null;
+    private bool isProcessingQueue = false;
     
     // Unified compilation tracking system
     private bool isWaitingForSuccessfulCompilation = false;
@@ -31,7 +33,10 @@ public class ChatWindow : EditorWindow
     private ChatSuggestionSystem suggestionSystem;
     private ChatWindowErrorHandler errorHandler;
     
-    [MenuItem("Tools/Chat Window")]
+    // Streaming settings
+    private bool useStreaming = true;
+    
+    [MenuItem("Tools/Chat Window %#d")]
     public static void ShowWindow()
     {
         ChatWindow window = GetWindow<ChatWindow>("Chat Window");
@@ -63,8 +68,8 @@ public class ChatWindow : EditorWindow
         
         // Initialize error handler with callbacks
         errorHandler.Initialize(
-            AddMessage,
-            RemoveMessageByReference,
+            (message) => QueueMessage(message, message.type == MessageType.System || message.type == MessageType.Error),
+            null, // No longer need message removal
             () => isWaitingForAI,
             (value) => isWaitingForAI = value,
             ScrollToBottom,
@@ -85,7 +90,8 @@ public class ChatWindow : EditorWindow
                                   "Type /help for available commands. " +
                                   "Voice input available! Click the microphone button to start/stop voice recognition.";
             
-            AddMessage(new ChatMessage("System", welcomeMessage, MessageType.System));
+            // Use streaming for welcome message too
+            QueueMessage(new ChatMessage("System", welcomeMessage, MessageType.System, true));
         }
     }
     
@@ -178,6 +184,14 @@ public class ChatWindow : EditorWindow
         
         GUILayout.Label("Chat Window", EditorStyles.boldLabel);
         GUILayout.FlexibleSpace();
+        
+        // Add streaming toggle
+        bool newUseStreaming = GUILayout.Toggle(useStreaming, "Streaming", EditorStyles.toolbarButton, GUILayout.Width(70));
+        if (newUseStreaming != useStreaming)
+        {
+            useStreaming = newUseStreaming;
+            QueueMessage(new ChatMessage("System", $"All message streaming {(useStreaming ? "enabled" : "disabled")}", MessageType.System, useStreaming));
+        }
         
         if (GUILayout.Button("Copy", EditorStyles.toolbarButton, GUILayout.Width(50)))
         {
@@ -276,9 +290,11 @@ public class ChatWindow : EditorWindow
     private void DrawHelpText()
     {
         EditorGUILayout.Space();
+        string streamingStatus = useStreaming ? "with streaming" : "without streaming";
         string helpText = aiEnabled ? 
-            "Chat with Claude AI! Ask it to create scripts, objects, or manipulate your Unity scene. Press Enter to send, Shift+Enter for new line." :
+            $"Chat with Claude AI {streamingStatus}! Ask it to create scripts, objects, or manipulate your Unity scene. Press Enter to send, Shift+Enter for new line." :
             "AI is disabled. Enable it to chat with Claude. Press Enter or click Send to send messages.";
+        EditorGUIUtility.AddCursorRect(GUILayoutUtility.GetLastRect(), MouseCursor.Arrow);
         EditorGUILayout.HelpBox(helpText, UnityEditor.MessageType.Info);
     }
     
@@ -310,7 +326,19 @@ public class ChatWindow : EditorWindow
         }
         else
         {
-            AddMessage(new ChatMessage("System", "AI is currently disabled.", MessageType.System));
+            // For non-AI messages, add directly without affecting isWaitingForAI
+            var systemMessage = new ChatMessage("System", "AI is currently disabled.", MessageType.System, useStreaming);
+            if (useStreaming)
+            {
+                messages.Add(systemMessage);
+                _ = StreamSystemMessageAsync(systemMessage); // Fire and forget
+            }
+            else
+            {
+                messages.Add(systemMessage);
+            }
+            ScrollToBottom();
+            Repaint();
         }
         
         suggestionSystem.UpdateSuggestions(aiEnabled, messages);
@@ -319,37 +347,65 @@ public class ChatWindow : EditorWindow
     private async System.Threading.Tasks.Task ProcessAIResponse(string userMessage)
     {
         isWaitingForAI = true;
-        currentThinkingMessage = new ChatMessage("Claude", "Thinking...", MessageType.System);
-        AddMessage(currentThinkingMessage);
+        
+        if (useStreaming)
+        {
+            await ProcessStreamingAIResponse(userMessage);
+        }
+        else
+        {
+            await ProcessNonStreamingAIResponse(userMessage);
+        }
+        
+        suggestionSystem.UpdateSuggestions(aiEnabled, messages);
         ScrollToBottom();
         Repaint();
-        
+    }
+    
+    private async System.Threading.Tasks.Task ProcessStreamingAIResponse(string userMessage)
+    {
         try
         {
-            string aiResponse = await ClaudeAIAgent.SendMessageAsync(userMessage, conversationHistory);
+            // Create streaming message
+            var streamingMessage = new ChatMessage("Claude", "", MessageType.Normal, true);
             
-            // Remove the thinking message using reference
-            RemoveMessageByReference(currentThinkingMessage, "Thinking");
-            
-            AddMessage(new ChatMessage("Claude", aiResponse));
-            conversationHistory.Add(ClaudeMessage.CreateTextMessage("assistant", aiResponse));
-            
-            suggestionSystem.UpdateSuggestions(aiEnabled, messages);
+            // Add the message to the UI immediately
+            messages.Add(streamingMessage);
+            currentlyStreamingMessage = streamingMessage;
             ScrollToBottom();
             Repaint();
+
+            string aiResponse = await ClaudeAIAgent.SendMessageStreamAsync(
+                userMessage, 
+                conversationHistory, 
+                false, // isErrorFix
+                (textDelta) => OnUnifiedStreamingTextDelta(streamingMessage, textDelta)
+            );
+
+            // Complete the streaming
+            streamingMessage.message = aiResponse;
+            streamingMessage.CompleteStreaming();
+            currentlyStreamingMessage = null;
+            
+            // Add to conversation history
+            conversationHistory.Add(ClaudeMessage.CreateTextMessage("assistant", aiResponse));
+            
+            // Process any queued error batches after normal AI response
+            errorHandler.ProcessQueuedErrors(suggestionSystem, messages);
         }
         catch (System.Exception ex)
         {
-            // Remove the thinking message using reference
-            RemoveMessageByReference(currentThinkingMessage, "Thinking");
+            // Clean up streaming state
+            if (currentlyStreamingMessage != null)
+            {
+                currentlyStreamingMessage.CompleteStreaming();
+                currentlyStreamingMessage = null;
+            }
             
-            AddMessage(new ChatMessage("System", $"AI Error: {ex.Message}", MessageType.Error));
-            ScrollToBottom();
-            Repaint();
+            QueueMessage(new ChatMessage("System", $"AI Error: {ex.Message}", MessageType.Error, true));
         }
         finally
         {
-            currentThinkingMessage = null;
             isWaitingForAI = false;
             
             // Reset successful compilation state if no compilation is happening
@@ -358,60 +414,282 @@ public class ChatWindow : EditorWindow
                 isWaitingForSuccessfulCompilation = false;
                 currentCompilationWaitMessage = null;
             }
+            ScrollToBottom();
+            Repaint();
+        }
+    }
+
+    private async System.Threading.Tasks.Task ProcessNonStreamingAIResponse(string userMessage)
+    {
+        ChatMessage thinkingMessage = null;
+        try
+        {
+            // Add thinking message directly
+            thinkingMessage = new ChatMessage("Claude", "Thinking...", MessageType.System, useStreaming);
+            if (useStreaming)
+            {
+                messages.Add(thinkingMessage);
+                await StreamSystemMessage(thinkingMessage);
+                thinkingMessage.CompleteStreaming();
+            }
+            else
+            {
+                messages.Add(thinkingMessage);
+            }
+            ScrollToBottom();
+            Repaint();
+
+            string aiResponse = await ClaudeAIAgent.SendMessageAsync(userMessage, conversationHistory);
+            
+            // Remove thinking message and add AI response
+            if (thinkingMessage != null)
+            {
+                messages.Remove(thinkingMessage);
+            }
+            
+            var responseMessage = new ChatMessage("Claude", aiResponse, MessageType.Normal, useStreaming);
+            messages.Add(responseMessage);
+            
+            if (useStreaming)
+            {
+                await StreamSystemMessage(responseMessage);
+                responseMessage.CompleteStreaming();
+            }
+            
+            // Add to conversation history
+            conversationHistory.Add(ClaudeMessage.CreateTextMessage("assistant", aiResponse));
             
             // Process any queued error batches after normal AI response
             errorHandler.ProcessQueuedErrors(suggestionSystem, messages);
         }
+        catch (System.Exception ex)
+        {
+            // Remove thinking message on error
+            if (thinkingMessage != null)
+            {
+                messages.Remove(thinkingMessage);
+            }
+            
+            var errorMessage = new ChatMessage("System", $"AI Error: {ex.Message}", MessageType.Error, useStreaming);
+            messages.Add(errorMessage);
+            
+            if (useStreaming)
+            {
+                await StreamSystemMessage(errorMessage);
+                errorMessage.CompleteStreaming();
+            }
+        }
+        finally
+        {
+            isWaitingForAI = false;
+            
+            // Reset successful compilation state if no compilation is happening
+            if (!EditorApplication.isCompiling && !isWaitingForSuccessfulCompilation)
+            {
+                isWaitingForSuccessfulCompilation = false;
+                currentCompilationWaitMessage = null;
+            }
+            ScrollToBottom();
+            Repaint();
+        }
+    }
+
+    private void OnStreamingTextDelta(string textDelta)
+    {
+        if (currentlyStreamingMessage != null)
+        {
+            currentlyStreamingMessage.AppendText(textDelta);
+            
+            // Update UI on main thread
+            EditorApplication.delayCall += () => {
+                ScrollToBottom();
+                Repaint();
+            };
+        }
     }
     
+    private void OnUnifiedStreamingTextDelta(ChatMessage message, string textDelta)
+    {
+        if (message != null && message.isStreaming)
+        {
+            message.AppendText(textDelta);
+            
+            // Update UI on main thread
+            EditorApplication.delayCall += () => {
+                ScrollToBottom();
+                Repaint();
+            };
+        }
+    }
+    
+    // Unified method to queue messages for streaming
+    public void QueueMessage(ChatMessage message, bool insertAboveStreaming = false, 
+                           System.Action<string> onTextDelta = null, System.Action onComplete = null)
+    {
+        var queueEntry = new MessageQueueEntry(message, insertAboveStreaming, onTextDelta, onComplete);
+        messageQueue.Enqueue(queueEntry);
+        
+        // Start processing if not already running
+        if (!isProcessingQueue)
+        {
+            ProcessNextMessage();
+        }
+    }
+    
+    // Legacy method for backward compatibility - now simplified
     private void AddMessage(ChatMessage message)
     {
-        messages.Add(message);
+        // For system messages, handle them directly without affecting AI state
+        if (message.type == MessageType.System || message.type == MessageType.Error)
+        {
+            // Insert above streaming message if one exists
+            if (currentlyStreamingMessage != null)
+            {
+                int streamingIndex = messages.IndexOf(currentlyStreamingMessage);
+                if (streamingIndex >= 0)
+                {
+                    messages.Insert(streamingIndex, message);
+                }
+                else
+                {
+                    messages.Add(message);
+                }
+            }
+            else
+            {
+                messages.Add(message);
+            }
+            
+            // Stream if enabled
+            if (useStreaming && message.isStreaming)
+            {
+                _ = StreamSystemMessageAsync(message); // Fire and forget
+            }
+        }
+        else
+        {
+            // For normal messages, add directly
+            messages.Add(message);
+        }
+        
         ScrollToBottom();
         Repaint();
     }
     
-    private void RemoveMessageByReference(ChatMessage messageToRemove, string messageType)
+    private async void ProcessNextMessage()
     {
-        if (messageToRemove == null)
-        {
-            Debug.Log($"[ChatWindow] No {messageType} message reference to remove");
+        if (isProcessingQueue || messageQueue.Count == 0)
             return;
-        }
+            
+        isProcessingQueue = true;
         
-        // Try to find by ID first (most robust)
-        int indexById = messages.FindIndex(m => m.id == messageToRemove.id);
-        if (indexById >= 0)
+        while (messageQueue.Count > 0)
         {
-            messages.RemoveAt(indexById);
-            Debug.Log($"[ChatWindow] Removed {messageType} message by ID at index {indexById}");
-            return;
-        }
-        
-        // Fallback: try to find by reference equality
-        int indexByRef = messages.IndexOf(messageToRemove);
-        if (indexByRef >= 0)
-        {
-            messages.RemoveAt(indexByRef);
-            Debug.Log($"[ChatWindow] Removed {messageType} message by reference at index {indexByRef}");
-            return;
-        }
-        
-        // Last resort: search by content (but log it as a fallback)
-        for (int i = messages.Count - 1; i >= 0; i--)
-        {
-            if (messages[i].message == messageToRemove.message && 
-                messages[i].username == messageToRemove.username &&
-                messages[i].type == messageToRemove.type)
+            var entry = messageQueue.Dequeue();
+            var message = entry.message;
+            
+            // Handle insertion above streaming message
+            if (entry.requiresInsertionAboveStreaming && currentlyStreamingMessage != null)
             {
-                messages.RemoveAt(i);
-                Debug.Log($"[ChatWindow] Removed {messageType} message by content match at index {i} (fallback method)");
-                return;
+                int streamingIndex = messages.IndexOf(currentlyStreamingMessage);
+                if (streamingIndex >= 0)
+                {
+                    messages.Insert(streamingIndex, message);
+                }
+                else
+                {
+                    messages.Add(message);
+                }
             }
+            else
+            {
+                messages.Add(message);
+            }
+            
+            // Handle streaming
+            if (message.isStreaming)
+            {
+                // Only set as currently streaming if this is not an AI response being handled elsewhere
+                if (entry.onTextDelta == null && currentlyStreamingMessage == null)
+                {
+                    currentlyStreamingMessage = message;
+                }
+                
+                // For system/non-AI messages, simulate streaming by adding text character by character
+                if (entry.onTextDelta == null)
+                {
+                    await StreamSystemMessage(message);
+                    message.CompleteStreaming();
+                    
+                    // Only clear if we set it
+                    if (currentlyStreamingMessage == message)
+                    {
+                        currentlyStreamingMessage = null;
+                    }
+                }
+                
+                // Call completion callback if provided
+                entry.onComplete?.Invoke();
+            }
+            
+            ScrollToBottom();
+            Repaint();
         }
         
-        Debug.LogWarning($"[ChatWindow] Could not find {messageType} message to remove. Message count: {messages.Count}");
+        isProcessingQueue = false;
     }
+    
+    private async System.Threading.Tasks.Task StreamSystemMessage(ChatMessage message)
+    {
+        var originalMessage = message.message;
+        message.message = "";
+        
+        // Stream character by character for system messages
+        for (int i = 0; i < originalMessage.Length; i++)
+        {
+            await System.Threading.Tasks.Task.Delay(20); // Adjust speed as needed
+            message.message += originalMessage[i];
+            
+            EditorApplication.delayCall += () => {
+                ScrollToBottom();
+                Repaint();
+            };
+        }
+    }
+    
+    private async System.Threading.Tasks.Task StreamSystemMessageAsync(ChatMessage message)
+    {
+        var originalMessage = message.message;
+        message.message = "";
+        
+        // Stream character by character for system messages
+        for (int i = 0; i < originalMessage.Length; i++)
+        {
+            await System.Threading.Tasks.Task.Delay(20); // Adjust speed as needed
+            message.message += originalMessage[i];
+            
+            EditorApplication.delayCall += () => {
+                ScrollToBottom();
+                Repaint();
+            };
+        }
+        
+        message.CompleteStreaming();
+    }
+    
+    private async System.Threading.Tasks.Task StreamMessageContent(ChatMessage message, System.Action<string> onTextDelta)
+    {
+        // This will be called by the AI streaming logic
+        // The onTextDelta callback will update the message content
+        // We just need to wait for the streaming to complete
+        while (message.isStreaming)
+        {
+            await System.Threading.Tasks.Task.Delay(50);
+        }
+    }
+    
+    // Note: Message removal is no longer needed with unified streaming queue system
+    // All messages go through the queue and are properly managed
     
     private void SendSuggestion(string suggestion)
     {
@@ -435,14 +713,16 @@ public class ChatWindow : EditorWindow
     {
         messages.Clear();
         conversationHistory.Clear();
+        messageQueue.Clear();
         
         // Reset all state variables to ensure UI returns to normal
         isWaitingForAI = false;
         isWaitingForSuccessfulCompilation = false;
-        currentThinkingMessage = null;
+        currentlyStreamingMessage = null;
         currentCompilationWaitMessage = null;
+        isProcessingQueue = false;
         
-        AddMessage(new ChatMessage("System", "Chat cleared.", MessageType.System));
+        QueueMessage(new ChatMessage("System", "Chat cleared.", MessageType.System, useStreaming));
     }
     
     private void ScrollToBottom()
@@ -455,7 +735,7 @@ public class ChatWindow : EditorWindow
         ChatClipboardManager.CopyConversationToClipboard(messages, consoleCapture.CapturedLogs, consoleCapture.IncludeLogs);
         
         string logInfo = consoleCapture.IncludeLogs ? $" + {consoleCapture.CapturedLogs.Count} console logs" : "";
-        AddMessage(new ChatMessage("System", $"Conversation copied to clipboard! ({messages.Count - 1} messages{logInfo})", MessageType.System));
+        QueueMessage(new ChatMessage("System", $"Conversation copied to clipboard! ({messages.Count - 1} messages{logInfo})", MessageType.System, useStreaming));
     }
     
     private void OnEditorUpdate()
@@ -482,13 +762,9 @@ public class ChatWindow : EditorWindow
     {
         Debug.Log("[ChatWindow] Successful compilation started");
         
-        // Remove thinking message if it exists
-        RemoveMessageByReference(currentThinkingMessage, "Thinking");
-        currentThinkingMessage = null;
-        
         // Add compilation message
-        currentCompilationWaitMessage = new ChatMessage("System", "⚙️ Compiling scripts...", MessageType.System);
-        AddMessage(currentCompilationWaitMessage);
+        currentCompilationWaitMessage = new ChatMessage("System", "⚙️ Compiling scripts...", MessageType.System, useStreaming);
+        QueueMessage(currentCompilationWaitMessage, true); // Insert above streaming messages
         ScrollToBottom();
         Repaint();
     }
@@ -497,8 +773,7 @@ public class ChatWindow : EditorWindow
     {
         Debug.Log("[ChatWindow] Successful compilation finished");
         
-        // Remove compilation message
-        RemoveMessageByReference(currentCompilationWaitMessage, "Compiling");
+        // Note: Compilation message will complete naturally through streaming queue
         currentCompilationWaitMessage = null;
         
         // Always ensure isWaitingForAI is false after compilation
@@ -534,7 +809,7 @@ public class ChatWindow : EditorWindow
                 successMessage = "✅ Scripts compiled successfully!";
             }
             
-            AddMessage(new ChatMessage("System", successMessage, MessageType.System));
+            QueueMessage(new ChatMessage("System", successMessage, MessageType.System, useStreaming), true);
         }
         else
         {
@@ -542,7 +817,7 @@ public class ChatWindow : EditorWindow
             if (customSuccessMessageProvider != null)
             {
                 string failureMessage = customSuccessMessageProvider(false);
-                AddMessage(new ChatMessage("System", failureMessage, MessageType.System));
+                QueueMessage(new ChatMessage("System", failureMessage, MessageType.System, useStreaming), true);
                 // Clear the callback after use
                 customSuccessMessageProvider = null;
             }

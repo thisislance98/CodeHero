@@ -217,17 +217,22 @@ public class ChatWindowErrorHandler
                 "🔧 Analyzing errors with AI..." : 
                 $"🔧 Analyzing remaining errors (attempt {errorFixAttempts}/{MAX_ERROR_FIX_ATTEMPTS})...";
                 
-            currentAnalyzingMessage = new ChatMessage("System", analysisMessage, MessageType.System);
+            currentAnalyzingMessage = new ChatMessage("Claude", "", MessageType.Normal);
             addMessageCallback(currentAnalyzingMessage);
             scrollToBottomCallback();
             repaintCallback();
             
-            Debug.Log("[ChatWindowErrorHandler] Sending error report to Claude AI");
+            Debug.Log("[ChatWindowErrorHandler] Sending error report to Claude AI with streaming");
             
             // Create a separate conversation history for error fixing
             var errorFixHistory = new List<ClaudeMessage>();
             
-            string aiResponse = await ClaudeAIAgent.SendMessageAsync(errorReport.ToString(), errorFixHistory, isErrorFix: true);
+            string aiResponse = await ClaudeAIAgent.SendMessageStreamAsync(
+                errorReport.ToString(), 
+                errorFixHistory, 
+                isErrorFix: true,
+                OnErrorFixStreamingTextDelta
+            );
             
             Debug.Log($"[ChatWindowErrorHandler] Received AI response: {aiResponse?.Substring(0, Math.Min(100, aiResponse?.Length ?? 0))}...");
             
@@ -236,8 +241,9 @@ public class ChatWindowErrorHandler
                 // Extract fix summary from AI response
                 ExtractFixSummary(aiResponse);
                 
-                addMessageCallback(new ChatMessage("Claude", aiResponse));
-                Debug.Log("[ChatWindowErrorHandler] Added Claude's error fix response");
+                // Update the final message
+                currentAnalyzingMessage.message = aiResponse;
+                Debug.Log("[ChatWindowErrorHandler] Updated Claude's error fix response");
                 
                 // Register our success callback with the main window's unified compilation system
                 parentWindow.RegisterCompilationSuccessCallback(CreateErrorFixSuccessMessage);
@@ -255,8 +261,6 @@ public class ChatWindowErrorHandler
                         {
                             Debug.Log("[ChatWindowErrorHandler] No compilation detected after error fix attempt, resetting state");
                             // No compilation happened, so no actual fixes were made
-                            removeMessageCallback(currentAnalyzingMessage, "Analyzing");
-                            currentAnalyzingMessage = null;
                             
                             // Clear the callback and reset state
                             parentWindow.ClearCompilationSuccessCallback();
@@ -293,6 +297,20 @@ public class ChatWindowErrorHandler
             
             scrollToBottomCallback();
             repaintCallback();
+        }
+    }
+    
+    private void OnErrorFixStreamingTextDelta(string textDelta)
+    {
+        if (currentAnalyzingMessage != null)
+        {
+            currentAnalyzingMessage.message += textDelta;
+            
+            // Update UI on main thread
+            EditorApplication.delayCall += () => {
+                scrollToBottomCallback();
+                repaintCallback();
+            };
         }
     }
     
