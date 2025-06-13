@@ -320,12 +320,19 @@ public class ClaudeAIAgent
                 
                 onTextDelta?.Invoke($"\n✅ Tool result: {result}");
                 
+                // Add a small delay to ensure the tool result is displayed before continuing
+                await Task.Delay(500);
+                
                 conversationMessages.Add(ClaudeMessage.CreateToolResultMessage(toolUse.id, result));
             }
             catch (Exception ex)
             {
                 var errorResult = $"Tool execution failed: {ex.Message}";
                 onTextDelta?.Invoke($"\n❌ Tool error: {errorResult}");
+                
+                // Add a small delay to ensure the error message is displayed
+                await Task.Delay(500);
+                
                 conversationMessages.Add(ClaudeMessage.CreateToolResultMessage(toolUse.id, errorResult));
             }
         }
