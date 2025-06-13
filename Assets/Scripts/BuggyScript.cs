@@ -4,23 +4,32 @@ using UnityEngine;
 
 public class BuggyScript : MonoBehaviour
 {
-    public int health = 100;
-    public string playerName = "Player";
+    public float speed = 5.0f;
+    public string playerName;
     
     void Start()
     {
-        Debug.Log("Starting game for " + playerName);
+        Debug.Log("Starting buggy script");
         // Fixed: Added missing semicolon
-        health = 50;
+        playerName = "Player1";
         
-        if (health > 0)
+        // Another syntax error - missing closing brace for if statement
+        if (speed > 0)
         {
-            Debug.Log("Player is alive with " + health + " health");
+            Debug.Log("Speed is positive");
         } // Fixed: Added missing closing brace for if statement
-    } // Fixed: Added missing closing brace for Start() method
+        
+        // Fixed: Added variable type declaration
+        int incorrectVariable = 10;
+    }
     
     void Update()
     {
-        transform.Rotate(0, 1, 0);
+        // Fixed: Corrected method call with proper parentheses
+        transform.Rotate(0, speed * Time.deltaTime, 0);
+        
+        // Fixed: Corrected method name typo
+        Debug.Log("Update called");
     }
-}
+    
+} // Fixed: Added missing closing brace for the class

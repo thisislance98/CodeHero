@@ -2,34 +2,84 @@
 
 ## Overview
 
-This Unity project contains a sophisticated AI-powered chat system built as custom Unity Editor tools. The system integrates with Claude AI to provide intelligent assistance for Unity development tasks, automatic error detection and fixing, and a comprehensive chat interface with **unified streaming** for all message types.
+This Unity project contains a sophisticated AI-powered chat system built as custom Unity Editor tools. The system integrates with Claude AI to provide intelligent assistance for Unity development tasks, automatic error detection and fixing, and a comprehensive chat interface with unified streaming for all message types.
 
 **Quick Access**: Press `Ctrl+Shift+D` to open the Chat Window from anywhere in Unity.
 
-## ✨ Recent Major Update: Unified Message Streaming System
+**Total Lines of Code**: 4,815 lines across 18 C# files
 
-**All message types now stream consistently!** System messages, AI responses, errors, and warnings all use the same character-by-character streaming effect, providing a cohesive and engaging user experience. System messages intelligently insert above currently streaming messages as preferred.
+## 📁 File Structure
+
+The editor scripts are organized into a modular structure under `Assets/Editor/ChatSystem/`:
+
+```
+Assets/Editor/ChatSystem/
+├── Core/ (1,045 lines)                    # Main chat system core
+│   ├── ChatWindow.cs (955 lines)         # Main controller & UI window
+│   └── ChatData.cs (90 lines)            # Data models & streaming infrastructure
+├── AI/ (2,427 lines)                     # Claude AI integration
+│   ├── ClaudeAIAgent.cs (416 lines)      # Core API communication & streaming
+│   ├── UnityTools.cs (968 lines)         # Unity tool implementations
+│   ├── GameObjectTools.cs (459 lines)    # GameObject manipulation tools
+│   ├── ScriptTools.cs (159 lines)        # Script creation & editing tools
+│   ├── ClaudeAPIModels.cs (151 lines)    # API data models & structures
+│   ├── SystemPrompts.cs (122 lines)      # System prompts for Claude
+│   ├── FileSystemTools.cs (103 lines)    # File system operations
+│   ├── ClaudeStreamingModels.cs (57 lines) # Streaming event models
+│   └── ClaudeJSONSerializer.cs (51 lines) # Custom JSON serialization
+├── UI/ (286 lines)                       # User interface components
+│   ├── ChatMessageRenderer.cs (148 lines) # Message rendering & styling
+│   └── ChatSuggestionSystem.cs (138 lines) # Quick actions & suggestions
+├── Utilities/ (998 lines)                # Helper classes & utilities
+│   ├── ChatWindowErrorHandler.cs (403 lines) # Automated error fixing
+│   ├── ChatWindowCLI.cs (237 lines)      # Command line interface
+│   ├── ChatConsoleCapture.cs (180 lines) # Console monitoring & error detection
+│   ├── ChatClipboardManager.cs (104 lines) # Data export functionality
+│   ├── ChatCommandHandler.cs (62 lines)  # User command processing
+│   └── AssetDatabaseRefresh.cs (12 lines) # Asset database utilities
+└── Configuration/ (1 line)               # Configuration files
+    └── claude_config.txt (1 line)        # Claude AI API key
+```
 
 ## Architecture Overview
 
 The system follows a modular architecture with clear separation of concerns:
 
 ```
-ChatWindow (Main Controller)
-├── ChatMessageRenderer (UI Rendering)
-├── ChatConsoleCapture (Error Detection)
-├── ChatCommandHandler (Command Processing)
-├── ChatSuggestionSystem (Quick Actions)
+📁 Core/ (1,045 lines)
+├── ChatWindow (Main Controller & Orchestration)  
+└── ChatData (Data Models & Streaming Infrastructure)
+
+📁 AI/ (2,427 lines - Fully Refactored)
+├── ClaudeAIAgent (Core API Communication)
+├── UnityTools (Unity Scene Manipulation)
+├── GameObjectTools (GameObject Operations)
+├── ScriptTools (Script Creation & Editing)
+├── FileSystemTools (File Operations)
+├── ClaudeAPIModels (API Data Structures)
+├── ClaudeStreamingModels (Streaming Event Models)
+├── ClaudeJSONSerializer (Custom Serialization)
+└── SystemPrompts (AI System Prompts)
+
+📁 UI/ (286 lines)
+├── ChatMessageRenderer (Message Styling & Display)
+└── ChatSuggestionSystem (Quick Actions & Context Awareness)
+
+📁 Utilities/ (998 lines)
 ├── ChatWindowErrorHandler (Automated Error Fixing)
-├── ChatClipboardManager (Data Export)
-├── ClaudeAIAgent (AI Integration)
-└── ChatData (Data Models)
+├── ChatConsoleCapture (Error Detection & Batching)
+├── ChatCommandHandler (User Command Processing)
+├── ChatClipboardManager (Data Export & Formatting)
+├── ChatWindowCLI (Command Line Interface)
+└── AssetDatabaseRefresh (Asset Database Utilities)
+
+📁 Configuration/ (1 line)
+└── claude_config.txt (API Key Storage)
 ```
 
 ## File Analysis
 
-### 1. ChatWindow.cs (731 lines) - Main Controller
-**Status: ✅ RECENTLY REFACTORED (Unified Streaming System)**
+### Core/ChatWindow.cs (955 lines) - Main Controller
 
 **Purpose**: The main EditorWindow that orchestrates the entire chat system with unified streaming for all message types.
 
@@ -37,7 +87,7 @@ ChatWindow (Main Controller)
 
 **Key Responsibilities**:
 - Window lifecycle management and UI layout
-- **Unified Message Streaming**: All message types stream character-by-character
+- Unified message streaming for all message types
 - AI interaction orchestration with proper state management
 - Compilation state tracking
 - Component initialization and cleanup
@@ -49,34 +99,28 @@ private ChatConsoleCapture consoleCapture;
 private ChatCommandHandler commandHandler;
 private ChatSuggestionSystem suggestionSystem;
 private ChatWindowErrorHandler errorHandler;
-// New streaming system
 private ChatMessage currentlyStreamingMessage = null;
 ```
 
-**Critical Features**:
-- **Unified Streaming System**: All message types use the same streaming infrastructure
-- **Smart Message Insertion**: System/error messages insert above streaming messages
-- **Proper State Management**: Guaranteed `isWaitingForAI` cleanup with try/finally blocks
-- **Send Button Fix**: Reliable re-enabling after AI responses
-- **Direct Message Handling**: Simplified architecture without complex queue callbacks
+### AI/ClaudeAIAgent.cs (416 lines) - Core API Communication
 
-**Event System**:
-- Console capture events for error detection
-- Command handler events for user commands
-- Error handler events for fix completion
-- Compilation events for build feedback
-- **Streaming coordination** for consistent message flow
-
-### 2. ClaudeAIAgent.cs (1020 lines) - AI Integration Core
-**Status: ⚠️ NEEDS REFACTORING (exceeds 500 line limit)**
-
-**Purpose**: Handles all Claude AI API communication and Unity tool integration.
+**Purpose**: Handles Claude AI API communication and streaming coordination.
 
 **Key Features**:
-- **API Communication**: Manages HTTP requests to Claude AI with proper authentication
-- **Tool System**: Provides Claude with Unity-specific tools for direct manipulation
-- **Message Serialization**: Handles complex JSON serialization for Claude's API format
-- **Error Context**: Specialized error-fixing mode for automated debugging
+- HTTP communication with Claude AI API
+- Streaming response processing and coordination
+- Error handling and retry logic
+- Cancellation token management
+- Tool execution orchestration
+
+**API Configuration**:
+- Uses `Configuration/claude_config.txt` or `CLAUDE_API_KEY` environment variable
+- Supports Claude Sonnet 4 model
+- Implements proper error handling and retry logic
+
+### AI/UnityTools.cs (968 lines) - Unity Tool Implementations
+
+**Purpose**: Provides Claude with Unity-specific tools for direct scene manipulation.
 
 **Available Tools for Claude**:
 1. `create_script` - Generate new C# scripts
@@ -85,52 +129,113 @@ private ChatMessage currentlyStreamingMessage = null;
 4. `set_transform` - Modify object positions, rotations, scales
 5. `list_gameobjects` - Query scene contents
 6. `delete_gameobject` - Remove objects from scene
-7. `edit_script` - Modify existing scripts
-8. `read_script` - Examine script contents
+7. `text_editor_20250429` - Claude's built-in text editor for advanced script editing
 
-**API Configuration**:
-- Uses `claude_config.txt` or `CLAUDE_API_KEY` environment variable
-- Supports latest Claude Sonnet 4 model
-- Implements proper error handling and retry logic
+### AI/GameObjectTools.cs (459 lines) - GameObject Operations
 
-### 3. ChatWindowErrorHandler.cs (387 lines) - Automated Error Fixing
+**Purpose**: Specialized tools for GameObject creation, manipulation, and querying.
+
+**Key Features**:
+- GameObject creation with primitive types
+- Component attachment and management
+- Transform manipulation (position, rotation, scale)
+- Scene querying and object inspection
+
+### AI/ScriptTools.cs (159 lines) - Script Creation & Editing
+
+**Purpose**: Tools for creating and managing C# scripts in Unity projects.
+
+**Key Features**:
+- Script file creation with proper Unity formatting
+- Compilation waiting and monitoring
+- Asset database integration
+- Script template management
+
+### AI/FileSystemTools.cs (103 lines) - File System Operations
+
+**Purpose**: File system operations for project file management.
+
+**Key Features**:
+- File searching and pattern matching
+- Directory navigation and listing
+- Path resolution and validation
+- Asset path management
+
+### AI/ClaudeAPIModels.cs (151 lines) - API Data Models
+
+**Purpose**: Defines all data structures used for Claude AI API communication.
+
+**Key Classes**:
+```csharp
+public class ClaudeMessage          // API message structure
+public class ClaudeContentBlock     // Message content blocks
+public class ClaudeRequest          // API request format
+public class ClaudeResponse         // API response format
+public class ClaudeTool             // Tool definitions
+public class ClaudeToolInputSchema  // Tool parameter schemas
+```
+
+### AI/ClaudeStreamingModels.cs (57 lines) - Streaming Event Models
+
+**Purpose**: Data models for handling Claude AI streaming responses.
+
+**Key Classes**:
+```csharp
+public class StreamEvent            // Base streaming event
+public class ContentBlockStartEvent // Content block started
+public class ContentBlockDeltaEvent // Content block delta updates
+public class MessageDeltaEvent      // Message-level updates
+public class StreamError            // Error events
+```
+
+### AI/ClaudeJSONSerializer.cs (51 lines) - Custom JSON Serialization
+
+**Purpose**: Custom JSON contract resolver for proper Claude AI API serialization.
+
+**Key Features**:
+- Excludes null and empty values from serialization
+- Handles built-in tool serialization correctly
+- Optimizes API request payload size
+- Ensures API compatibility
+
+### AI/SystemPrompts.cs (122 lines) - AI System Prompts
+
+**Purpose**: Contains the system prompts that define Claude's behavior as a Unity development agent.
+
+**Key Features**:
+- CodeHero system prompt with Unity-specific instructions
+- Project path and context information
+- Tool usage guidelines and workflows
+- Error diagnosis and fixing instructions
+
+### Utilities/ChatWindowErrorHandler.cs (403 lines) - Automated Error Fixing
 
 **Purpose**: Provides intelligent, automated error detection and fixing capabilities.
 
 **Key Features**:
-- **Error Batching**: Groups related errors to avoid spam
-- **Queue System**: Manages error processing when AI is busy
-- **Retry Logic**: Attempts fixes up to 3 times with progressively better context
-- **Fix Tracking**: Maintains summaries of applied fixes
-- **Cycle Management**: Prevents infinite error-fixing loops
+- Error batching to group related errors
+- Queue system for managing error processing when AI is busy
+- Retry logic with up to 3 attempts
+- Fix tracking with summaries of applied fixes
+- Cycle management to prevent infinite error-fixing loops
 
 **Error Processing Workflow**:
-1. **Detection**: Receives error batches from console capture
-2. **Analysis**: Sends errors to Claude with context and instructions
-3. **Implementation**: Claude uses tools to fix detected issues
-4. **Verification**: Monitors compilation to confirm fixes
-5. **Reporting**: Provides detailed success/failure feedback
+1. Detection: Receives error batches from console capture
+2. Analysis: Sends errors to Claude with context and instructions
+3. Implementation: Claude uses tools to fix detected issues
+4. Verification: Monitors compilation to confirm fixes
+5. Reporting: Provides detailed success/failure feedback
 
-**Integration Points**:
-- Works with `ChatConsoleCapture` for error detection
-- Communicates with `ClaudeAIAgent` for AI-powered fixes
-- Coordinates with `ChatWindow` for UI updates and state management
-
-### 4. ChatConsoleCapture.cs (181 lines) - Error Detection System
+### Utilities/ChatConsoleCapture.cs (180 lines) - Error Detection System
 
 **Purpose**: Monitors Unity's console for errors and manages error batching.
 
 **Key Features**:
-- **Real-time Monitoring**: Captures all Unity console messages
-- **Error Batching**: Groups similar errors to reduce noise
-- **Deduplication**: Counts occurrences of identical errors
-- **Recent Error Tracking**: Determines if compilation was successful
-- **Memory Management**: Limits stored logs to prevent memory issues
-
-**Error Batching Logic**:
-- 1-second delay to collect related errors
-- Deduplication by message content and stack trace
-- Automatic processing when batch window expires
+- Real-time monitoring of Unity console messages
+- Error batching to group similar errors
+- Deduplication with occurrence counting
+- Recent error tracking for compilation success detection
+- Memory management with limited log storage
 
 **Data Structures**:
 ```csharp
@@ -144,39 +249,27 @@ public class ErrorBatch
 }
 ```
 
-### 5. ChatMessageRenderer.cs (121 lines) - UI Rendering
+### UI/ChatMessageRenderer.cs (148 lines) - UI Rendering
 
 **Purpose**: Handles all visual rendering of chat messages with proper styling.
 
 **Key Features**:
-- **Rich Text Support**: Supports Unity's rich text formatting
-- **Message Type Styling**: Different colors/styles for system, error, warning messages
-- **Responsive Layout**: Adapts to different window sizes
-- **Scroll Management**: Maintains proper scrolling behavior
+- Rich text support with Unity's formatting
+- Message type styling with different colors/styles
+- Responsive layout adapting to window sizes
+- Scroll management for proper user experience
 
-**Styling System**:
-- Message-specific styles for different types
-- Username styling with bold formatting
-- Timestamp display with consistent formatting
-- Dark theme background for message area
-
-### 6. ChatSuggestionSystem.cs (139 lines) - Quick Actions
+### UI/ChatSuggestionSystem.cs (138 lines) - Quick Actions
 
 **Purpose**: Provides contextual quick-action buttons for common tasks.
 
 **Key Features**:
-- **Context Awareness**: Suggestions adapt based on recent messages
-- **Dynamic Layout**: Responsive button layout based on window width
-- **State Management**: Proper enabling/disabling during AI operations
-- **Error Context**: Special suggestions when errors occur
+- Context-aware suggestions based on recent messages
+- Dynamic layout with responsive button positioning
+- State management during AI operations
+- Error-specific suggestions when errors occur
 
-**Suggestion Categories**:
-- **Basic Actions**: Create objects, list GameObjects, get help
-- **Context-Sensitive**: Follow-up actions based on recent messages
-- **Error Response**: Suggestions when errors are detected
-- **Utility Commands**: Quick access to common commands
-
-### 7. ChatCommandHandler.cs (63 lines) - Command Processing
+### Utilities/ChatCommandHandler.cs (62 lines) - Command Processing
 
 **Purpose**: Processes user commands starting with "/" prefix.
 
@@ -188,34 +281,19 @@ public class ErrorBatch
 - `/warn [message]` - Send a warning message
 - `/error [message]` - Send an error message
 
-**Architecture**:
-- Event-based communication with main window
-- Simple string parsing with space-separated arguments
-- Extensible design for adding new commands
-
-### 8. ChatClipboardManager.cs (105 lines) - Data Export
+### Utilities/ChatClipboardManager.cs (104 lines) - Data Export
 
 **Purpose**: Handles copying conversation data to clipboard with formatting.
 
 **Key Features**:
-- **Formatted Output**: Professional formatting with headers and sections
-- **Log Integration**: Optional inclusion of console logs
-- **Message Type Indication**: Clear prefixes for different message types
-- **Timestamp Preservation**: Maintains temporal context
+- Formatted output with headers and sections
+- Optional console log inclusion
+- Message type indication with clear prefixes
+- Timestamp preservation for temporal context
 
-**Export Format**:
-```
-=== Unity Chat Window Conversation ===
-Exported on: 2024-01-01 12:00:00
+### Core/ChatData.cs (90 lines) - Data Models & Streaming Infrastructure
 
-12:00:01 - User: Create a cube
-12:00:02 - Claude: I'll create a cube for you...
-=== End of Conversation ===
-```
-
-### 9. ChatData.cs (89 lines) - Data Models & Streaming Infrastructure
-
-**Purpose**: Defines core data structures used throughout the system, including unified streaming support.
+**Purpose**: Defines core data structures used throughout the system.
 
 **Key Classes**:
 ```csharp
@@ -226,28 +304,13 @@ public class ChatMessage
     public string message;      // Message content
     public string timestamp;    // When sent
     public MessageType type;    // Message category
-    
-    // ✨ NEW: Unified streaming state
     public bool isStreaming;    // Currently being streamed
     public bool isComplete;     // Streaming finished
-    
-    // Streaming methods
-    public void AppendText(string text);     // Add text during streaming
-    public void CompleteStreaming();         // Mark streaming as done
 }
 
 public enum MessageType
 {
     Normal, System, Warning, Error
-}
-
-// ✨ NEW: Unified message queue system
-public class MessageQueueEntry
-{
-    public ChatMessage message;
-    public bool requiresInsertionAboveStreaming;
-    public System.Action<string> onTextDelta;
-    public System.Action onComplete;
 }
 
 public class LogEntry
@@ -259,13 +322,13 @@ public class LogEntry
 }
 ```
 
-### 10. AssetDatabaseRefresh.cs (13 lines) - Utility
+### Utilities/AssetDatabaseRefresh.cs (12 lines) - Utility
 
 **Purpose**: Simple utility for manually refreshing Unity's Asset Database.
 
 **Usage**: Provides menu item `Tools/Refresh Asset Database` for manual database refresh.
 
-### 11. claude_config.txt (1 line) - Configuration
+### Configuration/claude_config.txt (1 line) - Configuration
 
 **Purpose**: Stores Claude AI API key for authentication.
 
@@ -273,128 +336,53 @@ public class LogEntry
 
 ## System Integration Flow
 
-### ✨ NEW: Unified Streaming Message Flow
+### Unified Streaming Message Flow
 1. User types message in `ChatWindow`
 2. `ChatWindow` adds user message to conversation
 3. `ClaudeAIAgent` processes message with available tools
-4. **AI response streams character-by-character** via `OnUnifiedStreamingTextDelta`
+4. AI response streams character-by-character via streaming callbacks
 5. `ChatMessageRenderer` displays streaming messages with consistent styling
 6. `ChatSuggestionSystem` updates contextual suggestions
-7. **State cleanup guaranteed** with try/finally blocks
+7. State cleanup with try/finally blocks
 
-### ✨ UPDATED: Error Handling Flow
+### Error Handling Flow
 1. `ChatConsoleCapture` detects Unity errors
 2. Errors are batched and sent to `ChatWindowErrorHandler`
 3. Error handler analyzes errors with `ClaudeAIAgent`
 4. Claude uses tools to fix detected issues
-5. **Error messages stream above currently streaming messages**
+5. Error messages stream above currently streaming messages
 6. `ChatWindow` monitors compilation for success confirmation
-7. Results are reported back to user **with streaming effects**
+7. Results are reported back to user with streaming effects
 
-### ✨ UPDATED: Command Processing Flow
-1. User enters command starting with "/"
-2. `ChatCommandHandler` parses and executes command
-3. Results are communicated back via events
-4. `ChatWindow` updates UI with **streaming system messages**
-5. **No interference with `isWaitingForAI` state**
+### Tool Execution Flow
+1. User sends request that requires tool usage
+2. Claude's text response streams
+3. Tool detection and parameter generation
+4. Tool execution with contextual feedback
+5. Tool result streaming
+6. Claude's analysis and follow-up response streams
 
 ## Key Design Patterns
 
-### 1. ✨ NEW: Unified Streaming Architecture
-- **All message types** stream consistently with character-by-character effects
-- **Smart insertion logic** for system messages above streaming content
-- **Fire-and-forget streaming** for system messages to avoid state interference
-- **Guaranteed state cleanup** with try/finally patterns
+### Unified Streaming Architecture
+- All message types stream consistently with character-by-character effects
+- Smart insertion logic for system messages above streaming content
+- Fire-and-forget streaming for system messages to avoid state interference
 
-### 2. Event-Driven Architecture
+### Event-Driven Architecture
 - Components communicate through events rather than direct references
 - Loose coupling allows for easy testing and modification
 - Clear separation of concerns
 
-### 3. Component-Based Design
+### Component-Based Design
 - Each major functionality is encapsulated in its own class
 - Main controller orchestrates but doesn't implement business logic
 - Easy to extend and maintain
 
-### 4. ✅ IMPROVED: State Management
-- **Robust tracking of AI operation states** with guaranteed cleanup
-- **Send button reliability** - proper re-enabling after all AI operations
-- **Proper cleanup and reset mechanisms** using try/finally blocks
-- **Prevention of concurrent operations** without breaking UI state
-
-### 5. Error Recovery
-- Graceful handling of API failures
-- Automatic retry logic for transient errors
-- User feedback for all error conditions
-- **Streaming error messages** for consistent user experience
-
-## Performance Considerations
-
-### Memory Management
-- Limited log storage (500 entries max)
-- Proper disposal of HTTP clients
-- Event subscription cleanup
-
-### API Efficiency
-- Batched error processing to reduce API calls
-- Conversation history management
-- Tool-based responses for direct Unity manipulation
-
-### UI Responsiveness
-- Async API calls to prevent blocking
-- Progressive UI updates during long operations
-- Proper scroll management for large conversations
-
-## Security Considerations
-
-### API Key Management
-- Environment variable support
-- Config file fallback
-- Clear error messages for missing keys
-
-### Input Validation
-- Command parsing with bounds checking
-- Safe tool parameter validation
-- Proper error handling for malformed inputs
-
-## Extensibility Points
-
-### Adding New Commands
-Extend `ChatCommandHandler.HandleCommand()` with new cases.
-
-### Adding New Tools for Claude
-1. Add tool definition in `ClaudeAIAgent.GetUnityTools()`
-2. Implement execution logic in `ExecuteToolAsync()`
-3. Update documentation
-
-### Adding New Message Types
-1. Extend `MessageType` enum in `ChatData.cs`
-2. Update rendering logic in `ChatMessageRenderer`
-3. Add appropriate styling
-
-## ✅ COMPLETED: Major Refactoring - Unified Streaming System
-
-### ✅ ChatWindow.cs - Streaming System Unification (731 lines)
-**Completed improvements**:
-- **Unified streaming infrastructure** for all message types
-- **Simplified state management** with guaranteed cleanup
-- **Fixed send button reliability** - no more stuck disabled state
-- **Removed complex message removal logic** - direct flow approach
-- **Smart message insertion** - system messages above streaming content
-
-### Remaining Refactoring Opportunities
-
-### Priority 1: ClaudeAIAgent.cs (1020 lines → multiple files)
-**Suggested breakdown**:
-- `ClaudeAIAgent.cs` (core API logic, ~300 lines)
-- `ClaudeAPIModels.cs` (data structures, ~200 lines)
-- `ClaudeUnityTools.cs` (Unity tool implementations, ~520 lines)
-
-### Priority 2: Further ChatWindow.cs refinements (optional)
-**Possible future breakdown**:
-- `ChatWindow.cs` (core window logic, ~400 lines)
-- `ChatWindowStreamingManager.cs` (streaming coordination, ~200 lines)
-- `ChatWindowUI.cs` (UI drawing methods, ~131 lines)
+### State Management
+- Robust tracking of AI operation states with guaranteed cleanup
+- Proper cleanup and reset mechanisms using try/finally blocks
+- Prevention of concurrent operations without breaking UI state
 
 ## Dependencies
 
@@ -406,59 +394,25 @@ Extend `ChatCommandHandler.HandleCommand()` with new cases.
 - **UnityEditor**: All editor functionality
 - **UnityEngine**: Core Unity API access
 
-## Testing Strategy
+## System Statistics
 
-### Unit Testing Opportunities
-- Command parsing logic
-- Error batching algorithms
-- Message formatting
-- Tool parameter validation
+### Code Distribution by Folder
+- **AI Folder**: 2,427 lines (50.4%) - Claude integration and tools
+- **Core Folder**: 1,045 lines (21.7%) - Main chat system
+- **Utilities Folder**: 998 lines (20.7%) - Helper functionality
+- **UI Folder**: 286 lines (5.9%) - User interface components
+- **Configuration**: 1 line (0.02%) - API key storage
 
-### Integration Testing
-- API communication with mocked responses
-- Error handling workflows
-- UI state management
+### Largest Files
+1. `UnityTools.cs` - 968 lines (Unity tool implementations)
+2. `ChatWindow.cs` - 955 lines (Main controller)
+3. `GameObjectTools.cs` - 459 lines (GameObject operations)
+4. `ClaudeAIAgent.cs` - 416 lines (API communication)
+5. `ChatWindowErrorHandler.cs` - 403 lines (Error handling)
 
-### Manual Testing Scenarios
-- Error fixing with various error types
-- Long conversation management
-- API key configuration scenarios
-- Tool execution verification
-
-## Conclusion
-
-This editor script system represents a sophisticated integration of AI capabilities into Unity's development environment. The **newly implemented unified streaming system** provides an engaging, consistent user experience across all message types while maintaining robust error handling and proper state management.
-
-## ✅ Major Achievements (Latest Update)
-
-### Unified Streaming Experience
-- **All message types stream consistently** with character-by-character effects
-- **System messages insert intelligently** above streaming content
-- **Seamless user experience** with cohesive visual feedback
-
-### Reliability Improvements
-- **Send button reliability fixed** - guaranteed re-enabling after AI operations
-- **Robust state management** with try/finally cleanup patterns
-- **Simplified architecture** reducing complexity and potential bugs
-
-### Performance & UX Enhancements
-- **Fire-and-forget streaming** for system messages
-- **Direct message flow** eliminating complex queue callbacks
-- **Consistent streaming speed** (20ms per character) for optimal readability
-
-## System Capabilities
-
-The system successfully demonstrates:
-- **Real-time AI integration** for development assistance with streaming responses
-- **Automated error detection and fixing** with streaming feedback
-- **Professional-grade Unity Editor tool development** with modern UX patterns
-- **Scalable architecture** with unified message handling for future enhancements
-- **Consistent streaming experience** across all interaction types
-
-## Recent Major Update Summary
-
-**What Changed**: Transformed from separate message handling systems to a unified streaming architecture where all message types (System, Normal, Warning, Error) provide the same engaging character-by-character streaming effect.
-
-**Impact**: More engaging user experience, improved reliability, simplified codebase, and elimination of the "stuck send button" issue.
-
-**Next Steps**: The core streaming system is now solid. Future improvements could focus on ClaudeAIAgent.cs refactoring for better maintainability. 
+### Architecture Benefits
+- **Maintainable**: No file exceeds 1000 lines, most under 500
+- **Modular**: Clear separation of concerns across folders
+- **Scalable**: Easy to add new features in appropriate locations
+- **Readable**: Well-organized code with consistent patterns
+- **Testable**: Isolated components with clear interfaces 
