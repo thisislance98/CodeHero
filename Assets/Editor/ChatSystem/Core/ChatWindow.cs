@@ -56,7 +56,7 @@ public class ChatWindow : EditorWindow
     private void OnEnable()
     {
         InitializeComponents();
-        LoadChatHistory(); // Restore chat history first
+        // LoadChatHistory(); // DISABLED: Chat restoration turned off to prevent message duplication
         SetupWelcomeMessages();
         SetupEventHandlers();
         
@@ -68,8 +68,7 @@ public class ChatWindow : EditorWindow
     
     private void OnDisable()
     {
-        // Save chat history before window closes
-        SaveChatHistory();
+        // SaveChatHistory(); // DISABLED: Chat restoration turned off to prevent message duplication
         
         // Stop CLI monitoring
         ChatWindowCLI.StopMonitoring();

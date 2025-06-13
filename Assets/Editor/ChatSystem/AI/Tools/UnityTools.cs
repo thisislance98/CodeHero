@@ -1,12 +1,15 @@
 using UnityEngine;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using System;
 using Newtonsoft.Json;
 
 // Unified tool coordinator that delegates to specialized tool classes
 public static class UnityTools
 {
+    // Tool execution deduplication system
+    private static HashSet<string> executingTools = new HashSet<string>();
+    private static readonly object toolLock = new object();
+    
     public static List<ClaudeTool> GetUnityTools()
     {
         var allTools = new List<ClaudeTool>();
@@ -20,7 +23,7 @@ public static class UnityTools
         return allTools;
     }
     
-    public static async Task<string> ExecuteToolAsync(ClaudeToolUse toolUse)
+    public static string ExecuteTool(ClaudeToolUse toolUse)
     {
         try
         {
@@ -47,7 +50,7 @@ public static class UnityTools
                 // Script tools
                 case "create_script":
                     Debug.Log("[ClaudeAI] Delegating to ScriptTools");
-                    return await ScriptTools.ExecuteScriptToolAsync(toolUse);
+                    return ScriptTools.ExecuteScriptTool(toolUse);
                     
                 // GameObject tools
                 case "create_gameobject":

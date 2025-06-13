@@ -8,6 +8,7 @@ using System.Text;
 using System;
 using Newtonsoft.Json;
 using System.IO;
+using System.Linq;
 
 public class ClaudeAIAgent
 {
@@ -309,29 +310,72 @@ public class ClaudeAIAgent
             content = assistantContentBlocks
         });
 
-        // Execute tools and add results
-        foreach (var toolUse in toolUses)
+        // Execute tools and add results with enhanced streaming feedback
+        for (int i = 0; i < toolUses.Count; i++)
         {
+            var toolUse = toolUses[i];
+            
             try
             {
-                onTextDelta?.Invoke($"\n🔧 Executing tool: {toolUse.name}...");
+                onTextDelta?.Invoke($"\n🔧 Executing tool {i + 1}/{toolUses.Count}: {toolUse.name}");
                 
-                var result = await UnityTools.ExecuteToolAsync(toolUse);
+                // Show parameter preview if available
+                if (toolUse.input != null)
+                {
+                    try
+                    {
+                        var inputDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(
+                            JsonConvert.SerializeObject(toolUse.input));
+                        
+                        if (inputDict != null && inputDict.Count > 0)
+                        {
+                            var previewParams = new List<string>();
+                            foreach (var kvp in inputDict.Take(2)) // Show first 2 parameters
+                            {
+                                var valuePreview = kvp.Value?.ToString();
+                                if (!string.IsNullOrEmpty(valuePreview))
+                                {
+                                    if (valuePreview.Length > 30)
+                                        valuePreview = valuePreview.Substring(0, 30) + "...";
+                                    previewParams.Add($"{kvp.Key}: {valuePreview}");
+                                }
+                            }
+                            if (previewParams.Count > 0)
+                            {
+                                onTextDelta?.Invoke($"\n   📋 Parameters: {string.Join(", ", previewParams)}");
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore parameter preview errors
+                    }
+                }
                 
-                onTextDelta?.Invoke($"\n✅ Tool result: {result}");
+                onTextDelta?.Invoke("\n   ⚙️ Processing...");
+                
+                var result = UnityTools.ExecuteTool(toolUse);
+                
+                // Provide success feedback with result preview
+                var resultPreview = result;
+                if (!string.IsNullOrEmpty(resultPreview) && resultPreview.Length > 100)
+                {
+                    resultPreview = resultPreview.Substring(0, 100) + "...";
+                }
+                onTextDelta?.Invoke($"\n   ✅ Completed: {resultPreview}");
                 
                 // Add a small delay to ensure the tool result is displayed before continuing
-                await Task.Delay(500);
+                await Task.Delay(300);
                 
                 conversationMessages.Add(ClaudeMessage.CreateToolResultMessage(toolUse.id, result));
             }
             catch (Exception ex)
             {
                 var errorResult = $"Tool execution failed: {ex.Message}";
-                onTextDelta?.Invoke($"\n❌ Tool error: {errorResult}");
+                onTextDelta?.Invoke($"\n   ❌ Error: {ex.Message}");
                 
                 // Add a small delay to ensure the error message is displayed
-                await Task.Delay(500);
+                await Task.Delay(300);
                 
                 conversationMessages.Add(ClaudeMessage.CreateToolResultMessage(toolUse.id, errorResult));
             }
@@ -339,7 +383,7 @@ public class ClaudeAIAgent
 
         if (stopReason == "tool_use")
         {
-            onTextDelta?.Invoke("\n💬 Claude is analyzing the tool results...");
+            onTextDelta?.Invoke("\n\n💬 Claude is analyzing the results and preparing response...");
             return await SendContinuationStreamAsync(conversationMessages, onTextDelta, cancellationToken);
         }
 
@@ -413,10 +457,17 @@ public class ClaudeAIAgent
                     if (contentBlock.partial_input == null)
                     {
                         contentBlock.partial_input = "";
-                        onTextDelta?.Invoke(" (generating parameters...)");
+                        onTextDelta?.Invoke(" (analyzing parameters...)");
                     }
                     
                     contentBlock.partial_input += delta.delta.partial_json;
+                    
+                    // Provide progress feedback during parameter generation
+                    var parameterLength = contentBlock.partial_input?.Length ?? 0;
+                    if (parameterLength > 0 && parameterLength % 50 == 0) // Every 50 characters
+                    {
+                        onTextDelta?.Invoke(".");
+                    }
                     
                     try
                     {
@@ -438,12 +489,12 @@ public class ClaudeAIAgent
                                 };
                                 toolUses.Add(toolUse);
                             }
-                            onTextDelta?.Invoke(" ✓\n");
+                            onTextDelta?.Invoke(" ✓ Ready to execute!\n");
                         }
                     }
                     catch (JsonException)
                     {
-                        // JSON not complete yet, continue accumulating
+                        // Still building the JSON, continue
                     }
                 }
                 break;

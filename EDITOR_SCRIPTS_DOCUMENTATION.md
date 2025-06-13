@@ -6,7 +6,7 @@ This Unity project contains a sophisticated AI-powered chat system built as cust
 
 **Quick Access**: Press `Ctrl+Shift+D` to open the Chat Window from anywhere in Unity.
 
-**Total Lines of Code**: 4,815 lines across 18 C# files
+**Total Lines of Code**: 5,114 lines across 19 C# files
 
 ## 📁 File Structure
 
@@ -17,16 +17,18 @@ Assets/Editor/ChatSystem/
 ├── Core/ (1,045 lines)                    # Main chat system core
 │   ├── ChatWindow.cs (955 lines)         # Main controller & UI window
 │   └── ChatData.cs (90 lines)            # Data models & streaming infrastructure
-├── AI/ (2,427 lines)                     # Claude AI integration
+├── AI/ (738 lines)                       # Claude AI integration core
 │   ├── ClaudeAIAgent.cs (416 lines)      # Core API communication & streaming
-│   ├── UnityTools.cs (968 lines)         # Unity tool implementations
-│   ├── GameObjectTools.cs (459 lines)    # GameObject manipulation tools
-│   ├── ScriptTools.cs (159 lines)        # Script creation & editing tools
 │   ├── ClaudeAPIModels.cs (151 lines)    # API data models & structures
 │   ├── SystemPrompts.cs (122 lines)      # System prompts for Claude
-│   ├── FileSystemTools.cs (103 lines)    # File system operations
 │   ├── ClaudeStreamingModels.cs (57 lines) # Streaming event models
-│   └── ClaudeJSONSerializer.cs (51 lines) # Custom JSON serialization
+│   ├── ClaudeJSONSerializer.cs (51 lines) # Custom JSON serialization
+│   └── Tools/ (1,989 lines)              # Claude AI tool implementations
+│       ├── UnityTools.cs (968 lines)     # Unity tool implementations
+│       ├── GameObjectTools.cs (459 lines) # GameObject manipulation tools
+│       ├── TextEditorTools.cs (299 lines) # Text editing & file operations
+│       ├── ScriptTools.cs (159 lines)    # Script creation & editing tools
+│       └── FileSystemTools.cs (103 lines) # File system operations
 ├── UI/ (286 lines)                       # User interface components
 │   ├── ChatMessageRenderer.cs (148 lines) # Message rendering & styling
 │   └── ChatSuggestionSystem.cs (138 lines) # Quick actions & suggestions
@@ -50,16 +52,18 @@ The system follows a modular architecture with clear separation of concerns:
 ├── ChatWindow (Main Controller & Orchestration)  
 └── ChatData (Data Models & Streaming Infrastructure)
 
-📁 AI/ (2,427 lines - Fully Refactored)
+📁 AI/ (738 lines - Core Integration)
 ├── ClaudeAIAgent (Core API Communication)
-├── UnityTools (Unity Scene Manipulation)
-├── GameObjectTools (GameObject Operations)
-├── ScriptTools (Script Creation & Editing)
-├── FileSystemTools (File Operations)
 ├── ClaudeAPIModels (API Data Structures)
 ├── ClaudeStreamingModels (Streaming Event Models)
 ├── ClaudeJSONSerializer (Custom Serialization)
-└── SystemPrompts (AI System Prompts)
+├── SystemPrompts (AI System Prompts)
+└── 📁 Tools/ (1,989 lines - Tool Implementations)
+    ├── UnityTools (Unity Scene Manipulation)
+    ├── GameObjectTools (GameObject Operations)
+    ├── TextEditorTools (Text Editing & File Operations)
+    ├── ScriptTools (Script Creation & Editing)
+    └── FileSystemTools (File System Operations)
 
 📁 UI/ (286 lines)
 ├── ChatMessageRenderer (Message Styling & Display)
@@ -79,7 +83,7 @@ The system follows a modular architecture with clear separation of concerns:
 
 ## File Analysis
 
-### Core/ChatWindow.cs (955 lines) - Main Controller
+### Core/ChatWindow.cs (991 lines) - Main Controller
 
 **Purpose**: The main EditorWindow that orchestrates the entire chat system with unified streaming for all message types.
 
@@ -89,8 +93,15 @@ The system follows a modular architecture with clear separation of concerns:
 - Window lifecycle management and UI layout
 - Unified message streaming for all message types
 - AI interaction orchestration with proper state management
-- Compilation state tracking
+- Compilation state tracking with automatic result feedback to Claude
 - Component initialization and cleanup
+
+**New Feature**: **Compilation Context Awareness with Automatic Response**
+- Automatically sends compilation success/failure results to Claude as user messages
+- **Claude automatically responds** to compilation results with acknowledgment and suggestions
+- Ensures Claude maintains awareness of whether its actions (script creation, error fixing) succeeded
+- Integrates with both default compilation messages and custom error-fixing messages
+- Provides contextual feedback and next steps after each compilation
 
 **Key Components**:
 ```csharp
@@ -118,7 +129,7 @@ private ChatMessage currentlyStreamingMessage = null;
 - Supports Claude Sonnet 4 model
 - Implements proper error handling and retry logic
 
-### AI/UnityTools.cs (968 lines) - Unity Tool Implementations
+### AI/Tools/UnityTools.cs (968 lines) - Unity Tool Implementations
 
 **Purpose**: Provides Claude with Unity-specific tools for direct scene manipulation.
 
@@ -131,7 +142,7 @@ private ChatMessage currentlyStreamingMessage = null;
 6. `delete_gameobject` - Remove objects from scene
 7. `text_editor_20250429` - Claude's built-in text editor for advanced script editing
 
-### AI/GameObjectTools.cs (459 lines) - GameObject Operations
+### AI/Tools/GameObjectTools.cs (459 lines) - GameObject Operations
 
 **Purpose**: Specialized tools for GameObject creation, manipulation, and querying.
 
@@ -141,7 +152,18 @@ private ChatMessage currentlyStreamingMessage = null;
 - Transform manipulation (position, rotation, scale)
 - Scene querying and object inspection
 
-### AI/ScriptTools.cs (159 lines) - Script Creation & Editing
+### AI/Tools/TextEditorTools.cs (299 lines) - Text Editing & File Operations
+
+**Purpose**: Advanced text editing and file manipulation tools for Claude AI.
+
+**Key Features**:
+- Claude's built-in text editor integration
+- File content viewing with line numbers
+- Precise string replacement operations
+- File creation and directory management
+- Advanced editing capabilities for various file types
+
+### AI/Tools/ScriptTools.cs (159 lines) - Script Creation & Editing
 
 **Purpose**: Tools for creating and managing C# scripts in Unity projects.
 
@@ -151,7 +173,7 @@ private ChatMessage currentlyStreamingMessage = null;
 - Asset database integration
 - Script template management
 
-### AI/FileSystemTools.cs (103 lines) - File System Operations
+### AI/Tools/FileSystemTools.cs (103 lines) - File System Operations
 
 **Purpose**: File system operations for project file management.
 
@@ -344,6 +366,7 @@ public class LogEntry
 5. `ChatMessageRenderer` displays streaming messages with consistent styling
 6. `ChatSuggestionSystem` updates contextual suggestions
 7. State cleanup with try/finally blocks
+8. **Compilation results trigger automatic Claude responses with feedback and suggestions**
 
 ### Error Handling Flow
 1. `ChatConsoleCapture` detects Unity errors
@@ -361,6 +384,7 @@ public class LogEntry
 4. Tool execution with contextual feedback
 5. Tool result streaming
 6. Claude's analysis and follow-up response streams
+7. **Compilation results trigger automatic Claude responses with contextual feedback**
 
 ## Key Design Patterns
 
@@ -397,18 +421,21 @@ public class LogEntry
 ## System Statistics
 
 ### Code Distribution by Folder
-- **AI Folder**: 2,427 lines (50.4%) - Claude integration and tools
+- **AI Folder**: 2,727 lines (56.6%) - Claude integration and tools
+  - **AI Core**: 738 lines (15.3%) - Core API communication and models
+  - **AI Tools**: 1,989 lines (41.3%) - Tool implementations
 - **Core Folder**: 1,045 lines (21.7%) - Main chat system
 - **Utilities Folder**: 998 lines (20.7%) - Helper functionality
 - **UI Folder**: 286 lines (5.9%) - User interface components
 - **Configuration**: 1 line (0.02%) - API key storage
 
 ### Largest Files
-1. `UnityTools.cs` - 968 lines (Unity tool implementations)
-2. `ChatWindow.cs` - 955 lines (Main controller)
-3. `GameObjectTools.cs` - 459 lines (GameObject operations)
-4. `ClaudeAIAgent.cs` - 416 lines (API communication)
-5. `ChatWindowErrorHandler.cs` - 403 lines (Error handling)
+1. `UnityTools.cs` - 968 lines (Unity tool implementations) - *AI/Tools/*
+2. `ChatWindow.cs` - 955 lines (Main controller) - *Core/*
+3. `GameObjectTools.cs` - 459 lines (GameObject operations) - *AI/Tools/*
+4. `ClaudeAIAgent.cs` - 416 lines (API communication) - *AI/*
+5. `ChatWindowErrorHandler.cs` - 403 lines (Error handling) - *Utilities/*
+6. `TextEditorTools.cs` - 299 lines (Text editing operations) - *AI/Tools/*
 
 ### Architecture Benefits
 - **Maintainable**: No file exceeds 1000 lines, most under 500

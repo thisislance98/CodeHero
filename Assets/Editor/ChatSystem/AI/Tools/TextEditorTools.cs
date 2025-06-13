@@ -178,7 +178,13 @@ public static class TextEditorTools
             var assetPath = "Assets" + fullPath.Substring(Application.dataPath.Length).Replace('\\', '/');
             AssetDatabase.ImportAsset(assetPath);
             
-            return "Successfully replaced text at exactly one location.";
+            var originalLength = oldStr?.Length ?? 0;
+            var newLength = newStr?.Length ?? 0;
+            var changeDelta = newLength - originalLength;
+            
+            return $"Successfully replaced text in '{Path.GetFileName(path)}'!\n" +
+                   $"📝 Changed {originalLength} characters to {newLength} characters ({changeDelta:+#;-#;0} delta)\n" +
+                   $"🔄 File updated and imported";
         }
         catch (Exception ex)
         {
@@ -212,7 +218,13 @@ public static class TextEditorTools
             var assetPath = "Assets" + fullPath.Substring(Application.dataPath.Length).Replace('\\', '/');
             AssetDatabase.ImportAsset(assetPath);
             
-            return $"Successfully created file: {path}";
+            var fileSize = fileText?.Length ?? 0;
+            var lineCount = fileText?.Split('\n').Length ?? 0;
+            
+            return $"Successfully created file '{Path.GetFileName(path)}'!\n" +
+                   $"📁 Location: {path}\n" +
+                   $"📝 Size: {fileSize} characters, {lineCount} lines\n" +
+                   $"🔄 File imported to Unity";
         }
         catch (Exception ex)
         {

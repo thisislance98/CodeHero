@@ -4,106 +4,182 @@ public class SampleScript : MonoBehaviour
 {
     [Header("Movement Settings")]
     public float moveSpeed = 5f;
-    public float rotationSpeed = 90f;
+    public float rotationSpeed = 100f;
     
-    [Header("Color Settings")]
-    public Color startColor = Color.white;
-    public Color endColor = Color.red;
-    public float colorChangeSpeed = 1f;
+    [Header("Physics Settings")]
+    public bool useGravity = true;
+    public float jumpForce = 10f;
     
+    [Header("Visual Settings")]
+    public Color highlightColor = Color.yellow;
+    public Material originalMaterial;
+    
+    private Rigidbody rb;
     private Renderer objectRenderer;
-    private float colorTimer = 0f;
+    private bool isGrounded = true;
     
     void Start()
     {
-        // Get the renderer component to change colors
+        // Get components
+        rb = GetComponent<Rigidbody>();
         objectRenderer = GetComponent<Renderer>();
         
-        // Set initial color
+        // Store original material
         if (objectRenderer != null)
         {
-            objectRenderer.material.color = startColor;
+            originalMaterial = objectRenderer.material;
         }
         
-        Debug.Log("SampleScript started on " + gameObject.name);
+        // Configure rigidbody
+        if (rb != null)
+        {
+            rb.useGravity = useGravity;
+        }
+        
+        Debug.Log("SampleScript initialized on " + gameObject.name);
     }
     
     void Update()
     {
-        // Handle input for movement
+        HandleInput();
         HandleMovement();
-        
-        // Handle rotation
-        HandleRotation();
-        
-        // Handle color changing
-        HandleColorChange();
-        
-        // Example of key press detection
-        if (Input.GetKeyDown(KeyCode.Space))
+    }
+    
+    void HandleInput()
+    {
+        // Jump input
+        if (Input.GetKeyDown(KeyCode.Space) && isGrounded && rb != null)
         {
-            Debug.Log("Space key pressed! Object position: " + transform.position);
+            Jump();
+        }
+        
+        // Highlight toggle
+        if (Input.GetKeyDown(KeyCode.H))
+        {
+            ToggleHighlight();
+        }
+        
+        // Reset position
+        if (Input.GetKeyDown(KeyCode.R))
+        {
+            ResetPosition();
         }
     }
     
     void HandleMovement()
     {
-        // Get input from arrow keys or WASD
-        float horizontal = Input.GetAxis("Horizontal"); // A/D or Left/Right arrows
-        float vertical = Input.GetAxis("Vertical");     // W/S or Up/Down arrows
+        // Get input
+        float horizontal = Input.GetAxis("Horizontal");
+        float vertical = Input.GetAxis("Vertical");
         
-        // Create movement vector
+        // Movement
         Vector3 movement = new Vector3(horizontal, 0, vertical) * moveSpeed * Time.deltaTime;
+        transform.Translate(movement, Space.World);
         
-        // Apply movement
-        transform.Translate(movement);
-    }
-    
-    void HandleRotation()
-    {
-        // Rotate the object continuously around Y-axis
-        transform.Rotate(0, rotationSpeed * Time.deltaTime, 0);
-    }
-    
-    void HandleColorChange()
-    {
-        if (objectRenderer != null)
+        // Rotation
+        if (Input.GetKey(KeyCode.Q))
         {
-            // Update timer
-            colorTimer += colorChangeSpeed * Time.deltaTime;
-            
-            // Use sine wave to smoothly transition between colors
-            float lerpValue = (Mathf.Sin(colorTimer) + 1f) / 2f;
-            
-            // Interpolate between start and end colors
-            Color currentColor = Color.Lerp(startColor, endColor, lerpValue);
-            objectRenderer.material.color = currentColor;
+            transform.Rotate(0, -rotationSpeed * Time.deltaTime, 0);
+        }
+        if (Input.GetKey(KeyCode.E))
+        {
+            transform.Rotate(0, rotationSpeed * Time.deltaTime, 0);
         }
     }
     
-    // Example of collision detection
+    void Jump()
+    {
+        if (rb != null && isGrounded)
+        {
+            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+            Debug.Log(gameObject.name + " jumped!");
+        }
+    }
+    
+    void ToggleHighlight()
+    {
+        if (objectRenderer != null)
+        {
+            if (objectRenderer.material.color == highlightColor)
+            {
+                objectRenderer.material = originalMaterial;
+            }
+            else
+            {
+                objectRenderer.material.color = highlightColor;
+            }
+        }
+    }
+    
+    void ResetPosition()
+    {
+        transform.position = Vector3.zero;
+        transform.rotation = Quaternion.identity;
+        
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+        }
+        
+        Debug.Log(gameObject.name + " position reset!");
+    }
+    
     void OnCollisionEnter(Collision collision)
     {
+        if (collision.gameObject.CompareTag("Ground"))
+        {
+            isGrounded = true;
+        }
+        
         Debug.Log(gameObject.name + " collided with " + collision.gameObject.name);
     }
     
-    // Example of trigger detection
+    void OnCollisionExit(Collision collision)
+    {
+        if (collision.gameObject.CompareTag("Ground"))
+        {
+            isGrounded = false;
+        }
+    }
+    
     void OnTriggerEnter(Collider other)
     {
-        Debug.Log(gameObject.name + " trigger entered by " + other.gameObject.name);
+        Debug.Log(gameObject.name + " triggered by " + other.gameObject.name);
     }
     
     // Public method that can be called from other scripts
-    public void ResetPosition()
+    public void CustomAction(string message)
     {
-        transform.position = Vector3.zero;
-        Debug.Log("Position reset to origin");
+        Debug.Log(gameObject.name + " received message: " + message);
+        
+        // Example: Scale pulse effect
+        StartCoroutine(ScalePulse());
     }
     
-    // Example of custom method with parameters
-    public void ChangeSpeed(float newSpeed)
+    System.Collections.IEnumerator ScalePulse()
     {
-        moveSpeed = newSpeed;
-        Debug.Log("Move speed changed to: " + newSpeed);
+        Vector3 originalScale = transform.localScale;
+        Vector3 targetScale = originalScale * 1.2f;
+        
+        // Scale up
+        float elapsedTime = 0;
+        while (elapsedTime < 0.2f)
+        {
+            transform.localScale = Vector3.Lerp(originalScale, targetScale, elapsedTime / 0.2f);
+            elapsedTime += Time.deltaTime;
+            yield return null;
+        }
+        
+        // Scale down
+        elapsedTime = 0;
+        while (elapsedTime < 0.2f)
+        {
+            transform.localScale = Vector3.Lerp(targetScale, originalScale, elapsedTime / 0.2f);
+            elapsedTime += Time.deltaTime;
+            yield return null;
+        }
+        
+        transform.localScale = originalScale;
     }
 }

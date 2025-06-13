@@ -1,8 +1,8 @@
 using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using System;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using System.IO;
 
@@ -30,7 +30,7 @@ public static class ScriptTools
         };
     }
     
-    public static async Task<string> ExecuteScriptToolAsync(ClaudeToolUse toolUse)
+    public static string ExecuteScriptTool(ClaudeToolUse toolUse)
     {
         var inputDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(
             JsonConvert.SerializeObject(toolUse.input));
@@ -39,7 +39,7 @@ public static class ScriptTools
         {
             case "create_script":
                 Debug.Log("[ClaudeAI] ScriptTools: About to call CreateScript");
-                var result = await CreateScript(inputDict);
+                var result = CreateScript(inputDict);
                 Debug.Log($"[ClaudeAI] ScriptTools: CreateScript returned: {result}");
                 return result;
                 
@@ -48,7 +48,7 @@ public static class ScriptTools
         }
     }
     
-    private static async Task<string> CreateScript(Dictionary<string, object> input)
+    private static string CreateScript(Dictionary<string, object> input)
     {
         try
         {
@@ -60,6 +60,7 @@ public static class ScriptTools
             
             Debug.Log($"[ClaudeAI] CreateScript: Script name = '{scriptName}', folder = '{folderPath}'");
             
+            // Step 1: Prepare directory
             var fullPath = Path.Combine(Application.dataPath, folderPath);
             Debug.Log($"[ClaudeAI] CreateScript: Full path = '{fullPath}'");
             
@@ -69,19 +70,34 @@ public static class ScriptTools
                 Directory.CreateDirectory(fullPath);
             }
             
+            // Step 2: Write script file
             var filePath = Path.Combine(fullPath, $"{scriptName}.cs");
             Debug.Log($"[ClaudeAI] CreateScript: Writing file to '{filePath}'");
+            
+            // Check if file already exists to prevent duplicates
+            if (File.Exists(filePath))
+            {
+                Debug.Log($"[ClaudeAI] CreateScript: File already exists, skipping creation: {filePath}");
+                return $"Script '{scriptName}.cs' already exists at {folderPath}/{scriptName}.cs";
+            }
+            
             File.WriteAllText(filePath, scriptContent);
             Debug.Log("[ClaudeAI] CreateScript: File written successfully");
             
-            // Use targeted import instead of full refresh to minimize compilation disruption
+            // Step 3: Import asset
             var relativePath = Path.Combine("Assets", folderPath, $"{scriptName}.cs");
             Debug.Log($"[ClaudeAI] CreateScript: Importing asset '{relativePath}'");
             AssetDatabase.ImportAsset(relativePath);
             Debug.Log("[ClaudeAI] CreateScript: Asset import completed");
             
-            // Return immediate success message with file path
-            var immediateResult = $"✅ Script '{scriptName}.cs' created successfully at {folderPath}/{scriptName}.cs";
+            // Return immediate success message with file details
+            var scriptSize = scriptContent.Length;
+            var lineCount = scriptContent.Split('\n').Length;
+            var immediateResult = $"Script '{scriptName}.cs' created successfully!\n" +
+                                $"📁 Location: {folderPath}/{scriptName}.cs\n" +
+                                $"📝 Size: {scriptSize} characters, {lineCount} lines\n" +
+                                $"🔄 Unity will compile automatically";
+            
             Debug.Log($"[ClaudeAI] CreateScript: Returning immediate result: {immediateResult}");
             return immediateResult;
         }
