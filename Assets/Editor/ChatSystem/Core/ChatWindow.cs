@@ -41,6 +41,10 @@ public class ChatWindow : EditorWindow
     // Streaming settings
     private bool useStreaming = true;
     
+    // Compilation result tracking
+    private double lastCompilationResultTime = 0;
+    private bool isProcessingCompilationResult = false;
+    
     [MenuItem("Tools/Chat Window %#d")]
     public static void ShowWindow()
     {
@@ -719,7 +723,8 @@ public class ChatWindow : EditorWindow
     
     private void OnEditorUpdate()
     {        
-        // Track compilation state changes for successful script creation
+        // Track compilation state changes for error fixing cycles only
+        // Script creation tools now provide immediate feedback, so we don't need compilation tracking for them
         if (isWaitingForSuccessfulCompilation)
         {
             if (!EditorApplication.isCompiling)
@@ -729,9 +734,9 @@ public class ChatWindow : EditorWindow
                 isWaitingForSuccessfulCompilation = false;
             }
         }
-        else if (EditorApplication.isCompiling && (isWaitingForAI || customSuccessMessageProvider != null || errorHandler.IsInErrorFixingCycle))
+        else if (EditorApplication.isCompiling && (customSuccessMessageProvider != null || errorHandler.IsInErrorFixingCycle))
         {
-            // Compilation started during AI interaction or error fixing
+            // Compilation started during error fixing (but not during normal AI tool use)
             OnSuccessfulCompilationStarted();
             isWaitingForSuccessfulCompilation = true;
         }
@@ -763,9 +768,24 @@ public class ChatWindow : EditorWindow
     
     private void CheckSuccessfulCompilation()
     {
-        // Check if compilation was successful (no recent errors)
-        bool hasRecentErrors = consoleCapture?.HasRecentErrors() ?? false;
-        bool success = !hasRecentErrors;
+        Debug.Log($"[ChatWindow] CheckSuccessfulCompilation called - isProcessingCompilationResult: {isProcessingCompilationResult}");
+        
+        // Prevent duplicate processing
+        if (isProcessingCompilationResult)
+        {
+            Debug.Log($"[ChatWindow] Already processing compilation result, skipping duplicate call");
+            return;
+        }
+        
+        isProcessingCompilationResult = true;
+        
+        try
+        {
+            // Check if compilation was successful (no recent errors)
+            bool hasRecentErrors = consoleCapture?.HasRecentErrors() ?? false;
+            bool success = !hasRecentErrors;
+            
+            Debug.Log($"[ChatWindow] Compilation check - hasRecentErrors: {hasRecentErrors}, success: {success}");
         
         if (success)
         {
@@ -782,26 +802,188 @@ public class ChatWindow : EditorWindow
                 successMessage = "✅ Scripts compiled successfully!";
             }
             
+            // Show system message to user
             QueueMessage(new ChatMessage("System", successMessage, MessageType.System, useStreaming), true);
+            
+            // Send compilation result to Claude as user message for context
+            SendCompilationResultToClaude(successMessage, true);
         }
         else
         {
             // Handle compilation failure
+            string failureMessage = "";
             if (customSuccessMessageProvider != null)
             {
-                string failureMessage = customSuccessMessageProvider(false);
+                failureMessage = customSuccessMessageProvider(false);
                 QueueMessage(new ChatMessage("System", failureMessage, MessageType.System, useStreaming), true);
                 // Clear the callback after use
                 customSuccessMessageProvider = null;
+                
+                // Send compilation failure result to Claude as user message for context
+                SendCompilationResultToClaude(failureMessage, false);
             }
             else
             {
-                // There were errors, the normal error fixing system will handle this
+                // Default failure message when no custom provider
+                failureMessage = "❌ Compilation failed. Please check the console for errors.";
+                QueueMessage(new ChatMessage("System", failureMessage, MessageType.System, useStreaming), true);
+                
+                // Send compilation failure result to Claude as user message for context
+                SendCompilationResultToClaude(failureMessage, false);
             }
         }
         
         ScrollToBottom();
         Repaint();
+        }
+        finally
+        {
+            // Reset the flag so future compilation results can be processed
+            isProcessingCompilationResult = false;
+            Debug.Log($"[ChatWindow] CheckSuccessfulCompilation completed, reset isProcessingCompilationResult flag");
+        }
+    }
+    
+    private async void SendCompilationResultToClaude(string compilationMessage, bool success)
+    {
+        try
+        {
+            // Prevent duplicate calls within 2 seconds
+            double currentTime = EditorApplication.timeSinceStartup;
+            if (currentTime - lastCompilationResultTime < 2.0)
+            {
+                Debug.Log($"[ChatWindow] Skipping duplicate compilation result call (too recent: {currentTime - lastCompilationResultTime:F2}s ago)");
+                return;
+            }
+            lastCompilationResultTime = currentTime;
+            
+            Debug.Log($"[ChatWindow] SendCompilationResultToClaude called - Success: {success}, Message: {compilationMessage}");
+            Debug.Log($"[ChatWindow] Current conversation history count: {conversationHistory.Count}");
+            Debug.Log($"[ChatWindow] Current messages count: {messages.Count}");
+            Debug.Log($"[ChatWindow] AI enabled: {aiEnabled}, waiting for AI: {isWaitingForAI}");
+            
+            // Create a user message for Claude with compilation context and request for response
+            string contextualPrompt = success ? 
+                "The script/code you just created or modified has compiled successfully." :
+                "The script/code you just created or modified failed to compile.";
+                
+            string claudeMessage = $"[SYSTEM NOTIFICATION - COMPILATION RESULT]\n{contextualPrompt}\n\nResult: {compilationMessage}\n\nPlease acknowledge this compilation result and provide any relevant feedback, suggestions, or next steps based on this outcome.";
+            
+            Debug.Log($"[ChatWindow] Claude message being sent: {claudeMessage.Substring(0, Math.Min(100, claudeMessage.Length))}...");
+            
+            // Add to UI messages as a user message
+            var userMessage = new ChatMessage("User", claudeMessage, MessageType.Normal);
+            messages.Add(userMessage);
+            
+            // Add to conversation history
+            conversationHistory.Add(ClaudeMessage.CreateTextMessage("user", claudeMessage));
+            
+            Debug.Log($"[ChatWindow] After adding compilation result - conversation history count: {conversationHistory.Count}");
+            Debug.Log($"[ChatWindow] After adding compilation result - messages count: {messages.Count}");
+            
+            // Debug: Show all conversation history entries
+            Debug.Log($"[ChatWindow] Full conversation history after adding compilation result:");
+            for (int i = 0; i < conversationHistory.Count; i++)
+            {
+                var entry = conversationHistory[i];
+                var preview = entry.content?[0]?.text?.Substring(0, Math.Min(30, entry.content?[0]?.text?.Length ?? 0)) ?? "[no text]";
+                Debug.Log($"[ChatWindow]   {i}: {entry.role} - {preview}...");
+            }
+            
+            Debug.Log($"[ChatWindow] Sent compilation result to Claude: {(success ? "SUCCESS" : "FAILURE")}");
+            
+            // Trigger Claude to respond to the compilation result
+            if (aiEnabled && !isWaitingForAI)
+            {
+                Debug.Log($"[ChatWindow] Scheduling Claude response to compilation result");
+                // Add a small delay to ensure UI updates are complete
+                EditorApplication.delayCall += () =>
+                {
+                    Debug.Log($"[ChatWindow] Executing delayed Claude response to compilation result");
+                    ScrollToBottom();
+                    Repaint();
+                    _ = ProcessCompilationResultResponse(); // Fire and forget
+                };
+            }
+            else
+            {
+                Debug.Log($"[ChatWindow] Skipping Claude response - AI disabled: {!aiEnabled}, waiting for AI: {isWaitingForAI}");
+            }
+            
+            ScrollToBottom();
+            Repaint();
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"[ChatWindow] Failed to send compilation result to Claude: {ex.Message}");
+        }
+    }
+
+    private async System.Threading.Tasks.Task ProcessCompilationResultResponse()
+    {
+        try
+        {
+            Debug.Log($"[ChatWindow] ProcessCompilationResultResponse started");
+            Debug.Log($"[ChatWindow] Conversation history count before response: {conversationHistory.Count}");
+            Debug.Log($"[ChatWindow] Last 3 conversation entries:");
+            for (int i = Math.Max(0, conversationHistory.Count - 3); i < conversationHistory.Count; i++)
+            {
+                var entry = conversationHistory[i];
+                var preview = entry.content?[0]?.text?.Substring(0, Math.Min(50, entry.content?[0]?.text?.Length ?? 0)) ?? "[no text]";
+                Debug.Log($"[ChatWindow]   {i}: {entry.role} - {preview}...");
+            }
+            
+            isWaitingForAI = true;
+            
+            // Create streaming message
+            var streamingMessage = new ChatMessage("Claude", "", MessageType.Normal, true);
+            
+            // Add the message to the UI immediately
+            messages.Add(streamingMessage);
+            currentlyStreamingMessage = streamingMessage;
+            ScrollToBottom();
+            Repaint();
+
+            Debug.Log($"[ChatWindow] Sending continuation prompt to Claude");
+            
+            // Send a direct request to Claude using the existing conversation history
+            // We'll send a simple continuation prompt to get Claude to respond to the compilation result
+            string aiResponse = await ClaudeAIAgent.SendMessageStreamAsync(
+                "Please respond to the above compilation result.", 
+                conversationHistory, 
+                (textDelta) => OnUnifiedStreamingTextDelta(streamingMessage, textDelta)
+            );
+
+            Debug.Log($"[ChatWindow] Received Claude response: {aiResponse?.Substring(0, Math.Min(100, aiResponse?.Length ?? 0))}...");
+
+            // Complete the streaming
+            streamingMessage.message = aiResponse;
+            streamingMessage.CompleteStreaming();
+            currentlyStreamingMessage = null;
+            
+            // Add to conversation history
+            conversationHistory.Add(ClaudeMessage.CreateTextMessage("assistant", aiResponse));
+            
+            Debug.Log($"[ChatWindow] Claude responded to compilation result - final conversation history count: {conversationHistory.Count}");
+        }
+        catch (System.Exception ex)
+        {
+            // Clean up streaming state
+            if (currentlyStreamingMessage != null)
+            {
+                currentlyStreamingMessage.CompleteStreaming();
+                currentlyStreamingMessage = null;
+            }
+            
+            Debug.LogError($"[ChatWindow] AI processing error for compilation result: {ex.Message}");
+            QueueMessage(new ChatMessage("System", $"AI Error: {ex.Message}", MessageType.Error, true));
+        }
+        finally
+        {
+            isWaitingForAI = false;
+            ScrollToBottom();
+            Repaint();
+        }
     }
     
     // Helper method to extract content preview from ClaudeContentBlock list

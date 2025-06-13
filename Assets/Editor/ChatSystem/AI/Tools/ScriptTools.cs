@@ -80,8 +80,8 @@ public static class ScriptTools
             AssetDatabase.ImportAsset(relativePath);
             Debug.Log("[ClaudeAI] CreateScript: Asset import completed");
             
-            // Return immediate success message with file path - don't wait for compilation
-            var immediateResult = $"✅ Script '{scriptName}.cs' created successfully at {folderPath}/{scriptName}.cs\n\n⚙️ Unity is now compiling the script...";
+            // Return immediate success message with file path
+            var immediateResult = $"✅ Script '{scriptName}.cs' created successfully at {folderPath}/{scriptName}.cs";
             Debug.Log($"[ClaudeAI] CreateScript: Returning immediate result: {immediateResult}");
             return immediateResult;
         }
