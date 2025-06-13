@@ -20,6 +20,7 @@ public class ChatSuggestionSystem
         {
             suggestions.AddRange(new string[]
             {
+                "Create a sample script",
                 "Create a cube",
                 "Create a sphere", 
                 "List all GameObjects",
