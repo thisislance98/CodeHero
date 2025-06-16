@@ -1,165 +1,225 @@
 using UnityEngine;
 
+/// <summary>
+/// Sample Unity script demonstrating common Unity patterns including:
+/// - Input handling
+/// - Transform manipulation
+/// - Component references
+/// - Unity lifecycle methods
+/// - Public/serialized fields for Inspector
+/// </summary>
 public class SamplePlayerController : MonoBehaviour
 {
     [Header("Movement Settings")]
-    public float moveSpeed = 5f;
-    public float jumpForce = 10f;
-    public float mouseSensitivity = 2f;
+    [SerializeField] private float moveSpeed = 5f;
+    [SerializeField] private float jumpForce = 10f;
+    [SerializeField] private float rotationSpeed = 100f;
     
     [Header("Ground Check")]
-    public Transform groundCheckPoint;
-    public float groundCheckRadius = 0.2f;
-    public LayerMask groundLayerMask = 1;
+    [SerializeField] private Transform groundCheck;
+    [SerializeField] private float groundCheckRadius = 0.2f;
+    [SerializeField] private LayerMask groundLayer = 1;
     
-    [Header("Components")]
-    private Rigidbody rb;
-    private Camera playerCamera;
+    [Header("References")]
+    [SerializeField] private Rigidbody rb;
+    [SerializeField] private Renderer playerRenderer;
+    
+    // Private variables
+    private Vector3 moveDirection;
     private bool isGrounded;
-    private float xRotation = 0f;
+    private Color originalColor;
     
+    /// <summary>
+    /// Unity's Start method - called once when the GameObject becomes active
+    /// </summary>
     void Start()
     {
-        // Get required components
-        rb = GetComponent<Rigidbody>();
-        playerCamera = GetComponentInChildren<Camera>();
+        // Get components if not assigned in inspector
+        if (rb == null)
+            rb = GetComponent<Rigidbody>();
         
-        // Lock cursor to center of screen
-        Cursor.lockState = CursorLockMode.Locked;
+        if (playerRenderer == null)
+            playerRenderer = GetComponent<Renderer>();
+        
+        // Store original color
+        if (playerRenderer != null)
+            originalColor = playerRenderer.material.color;
         
         // Create ground check point if not assigned
-        if (groundCheckPoint == null)
+        if (groundCheck == null)
         {
-            GameObject groundCheck = new GameObject("GroundCheck");
-            groundCheck.transform.SetParent(transform);
-            groundCheck.transform.localPosition = new Vector3(0, -1f, 0);
-            groundCheckPoint = groundCheck.transform;
+            GameObject groundCheckObj = new GameObject("GroundCheck");
+            groundCheckObj.transform.SetParent(transform);
+            groundCheckObj.transform.localPosition = Vector3.down * 0.5f;
+            groundCheck = groundCheckObj.transform;
         }
+        
+        Debug.Log($"SamplePlayerController initialized for {gameObject.name}");
     }
-
+    
+    /// <summary>
+    /// Unity's Update method - called once per frame
+    /// Handle input and non-physics updates here
+    /// </summary>
     void Update()
     {
-        HandleMouseLook();
         HandleInput();
         CheckGrounded();
+        HandleColorChange();
     }
-
+    
+    /// <summary>
+    /// Unity's FixedUpdate method - called at fixed intervals
+    /// Handle physics-related updates here
+    /// </summary>
     void FixedUpdate()
     {
-        HandleMovement();
+        MovePlayer();
     }
-
-    void HandleMouseLook()
+    
+    /// <summary>
+    /// Handle player input
+    /// </summary>
+    private void HandleInput()
     {
-        if (playerCamera == null) return;
+        // Get input axes (WASD or arrow keys)
+        float horizontal = Input.GetAxis("Horizontal");
+        float vertical = Input.GetAxis("Vertical");
         
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
-        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity;
-
-        // Rotate player body left/right
-        transform.Rotate(Vector3.up * mouseX);
-
-        // Rotate camera up/down
-        xRotation -= mouseY;
-        xRotation = Mathf.Clamp(xRotation, -90f, 90f);
-        playerCamera.transform.localRotation = Quaternion.Euler(xRotation, 0f, 0f);
-    }
-
-    void HandleInput()
-    {
-        // Jump input
+        // Create movement direction
+        moveDirection = new Vector3(horizontal, 0, vertical).normalized;
+        
+        // Handle jumping
         if (Input.GetKeyDown(KeyCode.Space) && isGrounded)
         {
             Jump();
         }
-
-        // Sample interaction input
-        if (Input.GetKeyDown(KeyCode.E))
-        {
-            Interact();
-        }
         
-        // Toggle cursor lock
-        if (Input.GetKeyDown(KeyCode.Escape))
+        // Handle rotation with Q and E keys
+        if (Input.GetKey(KeyCode.Q))
         {
-            ToggleCursor();
+            transform.Rotate(Vector3.up, -rotationSpeed * Time.deltaTime);
+        }
+        if (Input.GetKey(KeyCode.E))
+        {
+            transform.Rotate(Vector3.up, rotationSpeed * Time.deltaTime);
         }
     }
-
-    void HandleMovement()
+    
+    /// <summary>
+    /// Move the player based on input
+    /// </summary>
+    private void MovePlayer()
     {
-        if (rb == null) return;
-        
-        // Get input
-        float horizontal = Input.GetAxis("Horizontal");
-        float vertical = Input.GetAxis("Vertical");
-
-        // Calculate movement direction
-        Vector3 direction = (transform.right * horizontal + transform.forward * vertical).normalized;
-
-        // Apply movement
-        Vector3 targetVelocity = direction * moveSpeed;
-        targetVelocity.y = rb.linearVelocity.y; // Preserve vertical velocity
-        
-        rb.linearVelocity = targetVelocity;
+        if (rb != null && moveDirection != Vector3.zero)
+        {
+            // Move relative to player's current rotation
+            Vector3 moveVector = transform.TransformDirection(moveDirection) * moveSpeed;
+            moveVector.y = rb.velocity.y; // Preserve current Y velocity
+            
+            rb.velocity = moveVector;
+        }
     }
-
-    void Jump()
+    
+    /// <summary>
+    /// Make the player jump
+    /// </summary>
+    private void Jump()
     {
-        if (rb != null && isGrounded)
+        if (rb != null)
         {
             rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
             Debug.Log("Player jumped!");
         }
     }
-
-    void CheckGrounded()
+    
+    /// <summary>
+    /// Check if player is on the ground
+    /// </summary>
+    private void CheckGrounded()
     {
-        if (groundCheckPoint == null) return;
-        
-        isGrounded = Physics.CheckSphere(groundCheckPoint.position, groundCheckRadius, groundLayerMask);
-    }
-
-    void Interact()
-    {
-        // Sample interaction - check for objects in front of player
-        RaycastHit hit;
-        float interactRange = 3f;
-        
-        if (Physics.Raycast(playerCamera.transform.position, playerCamera.transform.forward, out hit, interactRange))
+        if (groundCheck != null)
         {
-            Debug.Log($"Interacting with: {hit.collider.name}");
-            
-            // Example: If object has a specific component, do something
-            var interactable = hit.collider.GetComponent<SampleInteractable>();
-            if (interactable != null)
+            isGrounded = Physics.CheckSphere(groundCheck.position, groundCheckRadius, groundLayer);
+        }
+    }
+    
+    /// <summary>
+    /// Change color when moving (visual feedback)
+    /// </summary>
+    private void HandleColorChange()
+    {
+        if (playerRenderer != null)
+        {
+            if (moveDirection != Vector3.zero)
             {
-                interactable.OnInteract();
+                // Change to green when moving
+                playerRenderer.material.color = Color.green;
+            }
+            else
+            {
+                // Return to original color when not moving
+                playerRenderer.material.color = originalColor;
             }
         }
     }
-
-    void ToggleCursor()
-    {
-        if (Cursor.lockState == CursorLockMode.Locked)
-        {
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-        }
-        else
-        {
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-        }
-    }
-
-    // Visualize ground check in scene view
+    
+    /// <summary>
+    /// Unity's OnDrawGizmosSelected - draws debug information in Scene view
+    /// </summary>
     void OnDrawGizmosSelected()
     {
-        if (groundCheckPoint != null)
+        // Draw ground check sphere
+        if (groundCheck != null)
         {
             Gizmos.color = isGrounded ? Color.green : Color.red;
-            Gizmos.DrawWireSphere(groundCheckPoint.position, groundCheckRadius);
+            Gizmos.DrawWireSphere(groundCheck.position, groundCheckRadius);
+        }
+        
+        // Draw movement direction
+        if (moveDirection != Vector3.zero)
+        {
+            Gizmos.color = Color.blue;
+            Gizmos.DrawRay(transform.position, transform.TransformDirection(moveDirection) * 2f);
+        }
+    }
+    
+    /// <summary>
+    /// Example of a public method that can be called from other scripts
+    /// </summary>
+    public void SetMoveSpeed(float newSpeed)
+    {
+        moveSpeed = Mathf.Max(0, newSpeed);
+        Debug.Log($"Move speed set to: {moveSpeed}");
+    }
+    
+    /// <summary>
+    /// Example of a property getter
+    /// </summary>
+    public bool IsGrounded => isGrounded;
+    
+    /// <summary>
+    /// Example of handling collisions
+    /// </summary>
+    void OnCollisionEnter(Collision collision)
+    {
+        if (collision.gameObject.CompareTag("Enemy"))
+        {
+            Debug.Log("Hit an enemy!");
+            // Handle enemy collision logic here
+        }
+    }
+    
+    /// <summary>
+    /// Example of handling trigger events
+    /// </summary>
+    void OnTriggerEnter(Collider other)
+    {
+        if (other.CompareTag("Collectible"))
+        {
+            Debug.Log("Collected an item!");
+            // Handle collectible logic here
+            Destroy(other.gameObject);
         }
     }
 }

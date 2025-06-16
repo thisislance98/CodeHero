@@ -16,6 +16,8 @@ public class ChatWindow : EditorWindow
     private Vector2 scrollPosition;
     private bool aiEnabled = true;
     private bool isWaitingForAI = false;
+    private bool autoFixEnabled = true;
+    private bool autoCompilationEnabled = true;
     
     // System message display
     private string lastSystemMessage = "";
@@ -73,6 +75,13 @@ public class ChatWindow : EditorWindow
         // Stop CLI monitoring
         ChatWindowCLI.StopMonitoring();
         
+        // Ensure compilation is re-enabled when window closes
+        if (!autoCompilationEnabled)
+        {
+            EditorApplication.UnlockReloadAssemblies();
+            Debug.Log("[ChatWindow] Re-enabled automatic compilation on window close");
+        }
+        
         CleanupComponents();
     }
     
@@ -104,6 +113,7 @@ public class ChatWindow : EditorWindow
         {
             string welcomeMessage = "Welcome to Unity Chat Window with Claude AI! " +
                                   "AI is enabled by default - ask Claude to create scripts, GameObjects, or help with Unity tasks. " +
+                                  "Auto Fix is enabled by default to automatically fix compilation errors. " +
                                   "Example: 'Create a player movement script' or 'Create a red cube at position 0,5,0'. " +
                                   "Type /help for available commands.";
             
@@ -134,6 +144,8 @@ public class ChatWindow : EditorWindow
             errorHandler.OnErrorFixingCompleted += OnErrorFixingCompleted;
         }
         
+
+        
         // Compilation events
         EditorApplication.update += OnEditorUpdate;
     }
@@ -158,6 +170,8 @@ public class ChatWindow : EditorWindow
         {
             errorHandler.OnErrorFixingCompleted -= OnErrorFixingCompleted;
         }
+        
+
         
         // Compilation events
         EditorApplication.update -= OnEditorUpdate;
@@ -186,7 +200,21 @@ public class ChatWindow : EditorWindow
         EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
         
         DrawHeader();
-        DrawMessagesArea();
+        
+        // Calculate available height for messages area
+        // Account for header (~25px), input area with suggestions (~180px), and padding
+        float headerHeight = 25f;
+        float baseInputHeight = 100f; // Base input area
+        float suggestionsHeight = (suggestionSystem.CurrentSuggestions != null && suggestionSystem.CurrentSuggestions.Length > 0) ? 60f : 0f;
+        float helpTextHeight = 40f; // Help text area
+        float padding = 15f;
+        
+        float totalInputAreaHeight = baseInputHeight + suggestionsHeight + helpTextHeight + padding;
+        float availableHeight = position.height - headerHeight - totalInputAreaHeight;
+        availableHeight = Mathf.Max(availableHeight, 200f); // Minimum height
+        
+        DrawMessagesArea(availableHeight);
+        
         DrawInputArea();
         
         EditorGUILayout.EndVertical();
@@ -198,6 +226,45 @@ public class ChatWindow : EditorWindow
         
         GUILayout.Label("Chat Window", EditorStyles.boldLabel);
         GUILayout.FlexibleSpace();
+        
+        // Add auto-fix toggle
+        bool newAutoFixEnabled = GUILayout.Toggle(autoFixEnabled, "Auto Fix", EditorStyles.toolbarButton, GUILayout.Width(70));
+        if (newAutoFixEnabled != autoFixEnabled)
+        {
+            autoFixEnabled = newAutoFixEnabled;
+            string statusMessage = autoFixEnabled ? 
+                "✅ Auto Fix enabled - compilation errors will be automatically fixed" : 
+                "⚠️ Auto Fix disabled - compilation errors will only be detected";
+            UpdateSystemMessage(statusMessage);
+        }
+        
+        // Add auto-compilation toggle
+        bool newAutoCompilationEnabled = GUILayout.Toggle(autoCompilationEnabled, "Auto Compile", EditorStyles.toolbarButton, GUILayout.Width(90));
+        if (newAutoCompilationEnabled != autoCompilationEnabled)
+        {
+            autoCompilationEnabled = newAutoCompilationEnabled;
+            
+            if (autoCompilationEnabled)
+            {
+                // Enable automatic compilation
+                if (EditorApplication.isCompiling)
+                {
+                    // If currently compiling, let it finish
+                    UpdateSystemMessage("🔄 Auto Compilation enabled - current compilation will finish");
+                }
+                else
+                {
+                    EditorApplication.UnlockReloadAssemblies();
+                    UpdateSystemMessage("✅ Auto Compilation enabled - scripts will compile automatically when modified");
+                }
+            }
+            else
+            {
+                // Disable automatic compilation by locking assemblies
+                EditorApplication.LockReloadAssemblies();
+                UpdateSystemMessage("⏸️ Auto Compilation disabled - scripts will not automatically compile until re-enabled");
+            }
+        }
         
         // Add streaming toggle
                     // Streaming is always enabled now - show as read-only indicator
@@ -219,21 +286,20 @@ public class ChatWindow : EditorWindow
         EditorGUILayout.Space();
     }
     
-    private void DrawMessagesArea()
+    private void DrawMessagesArea(float availableHeight)
     {
-        // Calculate available height for messages area
-        // Reserve space for input area (approximately 120 pixels for input + system message)
-        float reservedHeight = 120f;
-        float availableHeight = position.height - reservedHeight;
-        
-        EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true), GUILayout.MinHeight(200));
+        // Use the calculated available height to ensure messages area fills remaining space
+        EditorGUILayout.BeginVertical(GUILayout.Height(availableHeight), GUILayout.ExpandWidth(true));
         messageRenderer.DrawMessagesArea(messages, ref scrollPosition);
         EditorGUILayout.EndVertical();
     }
     
     private void DrawInputArea()
     {
-        EditorGUILayout.Space();
+        // Fixed-height input area to prevent expansion
+        EditorGUILayout.BeginVertical(GUILayout.ExpandWidth(true));
+        
+        EditorGUILayout.Space(2);
         
         // Draw system message label if we have one
         DrawSystemMessageLabel();
@@ -247,11 +313,11 @@ public class ChatWindow : EditorWindow
         
         EditorGUILayout.BeginVertical();
         EditorGUILayout.LabelField("Message:");
-        inputMessage = EditorGUILayout.TextArea(inputMessage, GUILayout.Height(60));
+        inputMessage = EditorGUILayout.TextArea(inputMessage, GUILayout.Height(60), GUILayout.ExpandWidth(true));
         EditorGUILayout.EndVertical();
         
         GUI.enabled = !isWaitingForAI;
-        bool sendButtonPressed = GUILayout.Button("Send", GUILayout.Width(60));
+        bool sendButtonPressed = GUILayout.Button("Send", GUILayout.Width(60), GUILayout.Height(60));
         GUI.enabled = true;
         
         if ((shouldSend || sendButtonPressed) && !string.IsNullOrEmpty(inputMessage.Trim()) && !isWaitingForAI)
@@ -264,6 +330,8 @@ public class ChatWindow : EditorWindow
         
         DrawSuggestions();
         DrawHelpText();
+        
+        EditorGUILayout.EndVertical();
     }
     
     private bool HandleInputKeyEvents()
@@ -345,7 +413,7 @@ public class ChatWindow : EditorWindow
     
     private void DrawHelpText()
     {
-        EditorGUILayout.Space();
+        EditorGUILayout.Space(2);
         string helpText = aiEnabled ? 
             "Chat with Claude AI with real-time streaming! Ask it to create scripts, objects, or manipulate your Unity scene. Press Enter to send, Shift+Enter for new line." :
             "AI is disabled. Enable it to chat with Claude. Press Enter or click Send to send messages.";
@@ -1039,7 +1107,7 @@ public class ChatWindow : EditorWindow
     // Event handlers
     private void OnErrorBatchReceived(List<ErrorBatch> errorBatch)
     {
-        errorHandler.OnErrorBatchReceived(errorBatch, aiEnabled, consoleCapture, suggestionSystem, messages);
+        errorHandler.OnErrorBatchReceived(errorBatch, aiEnabled && autoFixEnabled, consoleCapture, suggestionSystem, messages);
     }
     
     private void OnErrorFixingCompleted(bool success)
@@ -1047,6 +1115,8 @@ public class ChatWindow : EditorWindow
         // Process any queued errors after error fixing is complete
         errorHandler.ProcessQueuedErrors(suggestionSystem, messages);
     }
+    
+
     
     // Chat History Persistence Methods
     private void SaveChatHistory()

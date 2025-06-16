@@ -72,7 +72,10 @@ public class ChatWindowErrorHandler
             
             // Create a single consolidated error message
             var errorSummary = CreateErrorSummary(errorBatch);
-            addMessageCallback(new ChatMessage("System", errorSummary, MessageType.Error));
+            string statusMessage = aiEnabled ? 
+                $"{errorSummary} - attempting automatic fix..." :
+                $"{errorSummary} (Auto Fix disabled)";
+            addMessageCallback(new ChatMessage("System", statusMessage, MessageType.Error));
             
             if (aiEnabled)
             {
@@ -90,7 +93,7 @@ public class ChatWindowErrorHandler
             }
             else
             {
-                Debug.Log("[ChatWindowErrorHandler] AI is disabled, skipping error fix");
+                Debug.Log("[ChatWindowErrorHandler] Auto Fix is disabled, skipping error fix");
             }
         };
     }
@@ -336,12 +339,12 @@ public class ChatWindowErrorHandler
         {
             var error = errorBatch[0];
             var countText = error.Count > 1 ? $" (occurred {error.Count} times)" : "";
-            return $"Error detected{countText}: {error.LogString} - attempting automatic fix...";
+            return $"Error detected{countText}: {error.LogString}";
         }
         else
         {
             var totalErrors = errorBatch.Sum(e => e.Count);
-            return $"Multiple errors detected ({errorBatch.Count} unique errors, {totalErrors} total occurrences) - attempting automatic fix...";
+            return $"Multiple errors detected ({errorBatch.Count} unique errors, {totalErrors} total occurrences)";
         }
     }
     
