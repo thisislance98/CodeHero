@@ -161,6 +161,9 @@ public static class ScriptTools
         }
         catch (Exception ex)
         {
+            // Make sure to notify completion even on error to prevent stuck state
+            ChatWindow.NotifyClaudeScriptOperationCompleted();
+            
             var error = $"Failed to create script: {ex.Message}";
             Debug.LogError($"[ClaudeAI] CreateScript: Exception occurred: {error}");
             Debug.LogError($"[ClaudeAI] CreateScript: Stack trace: {ex.StackTrace}");

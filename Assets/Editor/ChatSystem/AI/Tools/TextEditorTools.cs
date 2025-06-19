@@ -215,6 +215,11 @@ public static class TextEditorTools
         }
         catch (Exception ex)
         {
+            // Make sure to notify completion even on error for C# files
+            if (input.ContainsKey("path") && Path.GetExtension(input["path"].ToString()).ToLower() == ".cs")
+            {
+                ChatWindow.NotifyClaudeScriptOperationCompleted();
+            }
             return $"Error performing string replacement: {ex.Message}";
         }
     }
@@ -281,6 +286,11 @@ public static class TextEditorTools
         }
         catch (Exception ex)
         {
+            // Make sure to notify completion even on error for C# files
+            if (input.ContainsKey("path") && Path.GetExtension(input["path"].ToString()).ToLower() == ".cs")
+            {
+                ChatWindow.NotifyClaudeScriptOperationCompleted();
+            }
             return $"Error creating file: {ex.Message}";
         }
     }
@@ -330,6 +340,11 @@ public static class TextEditorTools
         }
         catch (Exception ex)
         {
+            // Make sure to notify completion even on error for C# files
+            if (input.ContainsKey("path") && Path.GetExtension(input["path"].ToString()).ToLower() == ".cs")
+            {
+                ChatWindow.NotifyClaudeScriptOperationCompleted();
+            }
             return $"Error inserting text: {ex.Message}";
         }
     }
