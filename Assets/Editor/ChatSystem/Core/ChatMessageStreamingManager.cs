@@ -231,4 +231,20 @@ public class ChatMessageStreamingManager
     }
 }
 
+public class MessageQueueEntry
+{
+    public ChatMessage message;
+    public bool requiresInsertionAboveStreaming;
+    public System.Action<string> onTextDelta;
+    public System.Action onComplete;
+    
+    public MessageQueueEntry(ChatMessage message, bool insertAboveStreaming, System.Action<string> onTextDelta, System.Action onComplete)
+    {
+        this.message = message;
+        this.requiresInsertionAboveStreaming = insertAboveStreaming;
+        this.onTextDelta = onTextDelta;
+        this.onComplete = onComplete;
+    }
+}
+
  
