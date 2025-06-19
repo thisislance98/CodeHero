@@ -70,6 +70,20 @@ public class ChatMessage
         };
     }
     
+    public static ChatMessage CreateAssistantMessage(string message, bool shouldStream = false)
+    {
+        return new ChatMessage
+        {
+            id = Guid.NewGuid().ToString(),
+            username = "Assistant",
+            message = message,
+            timestamp = DateTime.Now.ToString("HH:mm:ss"),
+            type = MessageType.Normal,
+            isStreaming = shouldStream,
+            isComplete = !shouldStream
+        };
+    }
+    
     public void SetTokenUsage(TokenUsageData usage)
     {
         tokenUsage = usage;
@@ -100,6 +114,25 @@ public class ChatMessage
     {
         isStreaming = false;
         isComplete = true;
+    }
+    
+    // Convenience properties for compatibility
+    public string content 
+    { 
+        get => message; 
+        set => message = value; 
+    }
+    
+    public string sender 
+    { 
+        get => username; 
+        set => username = value; 
+    }
+    
+    public bool shouldStream 
+    { 
+        get => isStreaming; 
+        set => isStreaming = value; 
     }
 }
 

@@ -242,11 +242,11 @@ public class ChatCompilationManager
             
             // Clear the flag immediately to prevent duplicate notifications
             SessionState.SetBool(SHOULD_NOTIFY_CLAUDE_KEY, false);
-            SessionState.DeleteKey(COMPILATION_MESSAGE_KEY);
+            SessionState.EraseString(COMPILATION_MESSAGE_KEY);
             OnSystemMessage?.Invoke("🔧 DEBUG: Cleared notification flag");
             
             // Get compilation messages
-            var messages = CompilationPipeline.GetCompileMessages();
+            var messages = CompilationPipeline.GetCompilerMessages();
             bool hasErrors = messages.Any(m => m.type == UnityEditor.Compilation.CompilerMessageType.Error);
             bool hasWarnings = messages.Any(m => m.type == UnityEditor.Compilation.CompilerMessageType.Warning);
             
