@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.Compilation;
 using System.Collections.Generic;
 using System;
 using Newtonsoft.Json;
@@ -150,6 +151,14 @@ public static class TextEditorTools
             var oldStr = input["old_str"].ToString();
             var newStr = input["new_str"].ToString();
             
+            ChatWindow.SendDebugMessage($"TextEditorTools str_replace: path='{path}', old_str length={oldStr?.Length ?? 0}, new_str length={newStr?.Length ?? 0}");
+            
+            // If this is a C# script, notify ChatWindow that Claude is performing a script operation
+            if (Path.GetExtension(path).ToLower() == ".cs")
+            {
+                ChatWindow.NotifyClaudeScriptOperationStarted();
+            }
+            
             // Handle path format
             string fullPath = GetFullPath(path);
             
@@ -178,13 +187,31 @@ public static class TextEditorTools
             var assetPath = "Assets" + fullPath.Substring(Application.dataPath.Length).Replace('\\', '/');
             AssetDatabase.ImportAsset(assetPath);
             
+            // If this is a C# script, request compilation
+            if (Path.GetExtension(path).ToLower() == ".cs")
+            {
+                Debug.Log("[ClaudeAI] TextEditorTools: Modified C# script, requesting compilation...");
+                ChatWindow.SendDebugMessage("⏳ Waiting for compilation...");
+                AssetDatabase.Refresh();
+                CompilationPipeline.RequestScriptCompilation();
+                Debug.Log("[ClaudeAI] TextEditorTools: Compilation requested");
+            }
+            
             var originalLength = oldStr?.Length ?? 0;
             var newLength = newStr?.Length ?? 0;
             var changeDelta = newLength - originalLength;
             
+            var compilationNote = Path.GetExtension(path).ToLower() == ".cs" ? "🔄 File updated and compilation requested" : "🔄 File updated and imported";
+            
+            // If this was a C# script, notify completion
+            if (Path.GetExtension(path).ToLower() == ".cs")
+            {
+                ChatWindow.NotifyClaudeScriptOperationCompleted();
+            }
+            
             return $"Successfully replaced text in '{Path.GetFileName(path)}'!\n" +
                    $"📝 Changed {originalLength} characters to {newLength} characters ({changeDelta:+#;-#;0} delta)\n" +
-                   $"🔄 File updated and imported";
+                   $"{compilationNote}";
         }
         catch (Exception ex)
         {
@@ -198,6 +225,14 @@ public static class TextEditorTools
         {
             var path = input["path"].ToString();
             var fileText = input["file_text"].ToString();
+            
+            ChatWindow.SendDebugMessage($"TextEditorTools create: path='{path}', fileText length={fileText?.Length ?? 0}");
+            
+            // If this is a C# script, notify ChatWindow that Claude is performing a script operation
+            if (Path.GetExtension(path).ToLower() == ".cs")
+            {
+                ChatWindow.NotifyClaudeScriptOperationStarted();
+            }
             
             string fullPath = GetFullPath(path);
             var directory = Path.GetDirectoryName(fullPath);
@@ -218,13 +253,31 @@ public static class TextEditorTools
             var assetPath = "Assets" + fullPath.Substring(Application.dataPath.Length).Replace('\\', '/');
             AssetDatabase.ImportAsset(assetPath);
             
+            // If this is a C# script, request compilation
+            if (Path.GetExtension(path).ToLower() == ".cs")
+            {
+                Debug.Log("[ClaudeAI] TextEditorTools: Created C# script, requesting compilation...");
+                ChatWindow.SendDebugMessage("⏳ Waiting for compilation...");
+                AssetDatabase.Refresh();
+                CompilationPipeline.RequestScriptCompilation();
+                Debug.Log("[ClaudeAI] TextEditorTools: Compilation requested");
+            }
+            
             var fileSize = fileText?.Length ?? 0;
             var lineCount = fileText?.Split('\n').Length ?? 0;
+            
+            var compilationNote = Path.GetExtension(path).ToLower() == ".cs" ? "🔄 File imported and compilation requested" : "🔄 File imported to Unity";
+            
+            // If this was a C# script, notify completion
+            if (Path.GetExtension(path).ToLower() == ".cs")
+            {
+                ChatWindow.NotifyClaudeScriptOperationCompleted();
+            }
             
             return $"Successfully created file '{Path.GetFileName(path)}'!\n" +
                    $"📁 Location: {path}\n" +
                    $"📝 Size: {fileSize} characters, {lineCount} lines\n" +
-                   $"🔄 File imported to Unity";
+                   $"{compilationNote}";
         }
         catch (Exception ex)
         {
@@ -239,6 +292,12 @@ public static class TextEditorTools
             var path = input["path"].ToString();
             var insertLine = Convert.ToInt32(input["insert_line"]);
             var newStr = input["new_str"].ToString();
+            
+            // If this is a C# script, notify ChatWindow that Claude is performing a script operation
+            if (Path.GetExtension(path).ToLower() == ".cs")
+            {
+                ChatWindow.NotifyClaudeScriptOperationStarted();
+            }
             
             string fullPath = GetFullPath(path);
             
@@ -260,6 +319,12 @@ public static class TextEditorTools
             // Use targeted import instead of full refresh
             var assetPath = "Assets" + fullPath.Substring(Application.dataPath.Length).Replace('\\', '/');
             AssetDatabase.ImportAsset(assetPath);
+            
+            // If this was a C# script, notify completion
+            if (Path.GetExtension(path).ToLower() == ".cs")
+            {
+                ChatWindow.NotifyClaudeScriptOperationCompleted();
+            }
             
             return $"Successfully inserted text at line {insertLine}.";
         }

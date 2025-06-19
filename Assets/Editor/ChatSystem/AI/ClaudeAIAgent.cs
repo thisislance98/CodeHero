@@ -18,6 +18,10 @@ public class ClaudeAIAgent
     private static HttpClient httpClient = new HttpClient();
     private static CancellationTokenSource currentCancellationSource;
     
+    private static Dictionary<string, string> previousToolContent = new Dictionary<string, string>();
+    private static Dictionary<string, DateTime> toolStartTimes = new Dictionary<string, DateTime>();
+    private static Dictionary<string, System.Threading.Timer> progressTimers = new Dictionary<string, System.Threading.Timer>();
+    
     static ClaudeAIAgent()
     {
         httpClient.DefaultRequestHeaders.Add("x-api-key", API_KEY);
@@ -98,12 +102,25 @@ public class ClaudeAIAgent
 
         try
         {
+            // Log what we're sending to Claude
+            ChatWindow.SendDebugMessage($"[ClaudeAI] SendMessageInternalAsync called with userMessage: '{userMessage}'");
+            ChatWindow.SendDebugMessage($"[ClaudeAI] ConversationHistory count: {conversationHistory?.Count ?? 0}");
+            
             List<ClaudeMessage> messages = new List<ClaudeMessage>();
             if (conversationHistory != null)
             {
                 messages.AddRange(conversationHistory);
+                // Log the last few messages for context
+                for (int i = Math.Max(0, conversationHistory.Count - 2); i < conversationHistory.Count; i++)
+                {
+                    var msg = conversationHistory[i];
+                    var preview = msg.content?[0]?.text?.Substring(0, Math.Min(100, msg.content?[0]?.text?.Length ?? 0)) ?? "[no content]";
+                    ChatWindow.SendDebugMessage($"[ClaudeAI] History[{i}]: {msg.role} - {preview}...");
+                }
             }
             messages.Add(ClaudeMessage.CreateTextMessage("user", userMessage));
+            
+            ChatWindow.SendDebugMessage($"[ClaudeAI] Total messages being sent to Claude: {messages.Count}");
 
             var request = new ClaudeRequest
             {
@@ -130,10 +147,15 @@ public class ClaudeAIAgent
             string jsonRequest = JsonConvert.SerializeObject(request, jsonSettings);
             var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
 
-            return await HandleStreamingResponse(content, onTextDelta, currentCancellationSource.Token);
+            ChatWindow.SendDebugMessage($"[ClaudeAI] About to send HTTP request to Claude API");
+            string result = await HandleStreamingResponse(content, onTextDelta, currentCancellationSource.Token);
+            ChatWindow.SendDebugMessage($"[ClaudeAI] Claude API returned response with length: {result?.Length ?? 0}");
+            
+            return result;
         }
         catch (TaskCanceledException ex)
         {
+            ChatWindow.SendDebugMessage($"[ClaudeAI] TaskCanceledException: {ex.Message}");
             if (currentCancellationSource?.Token.IsCancellationRequested == true)
             {
                 onTextDelta?.Invoke("\n⏹️ Streaming stopped by user.\n");
@@ -141,21 +163,25 @@ public class ClaudeAIAgent
             }
             throw new System.Exception("Request timed out. Please try again.");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            ChatWindow.SendDebugMessage($"[ClaudeAI] OperationCanceledException: {ex.Message}");
             onTextDelta?.Invoke("\n⏹️ Streaming stopped by user.\n");
             return "Streaming stopped by user.";
         }
         catch (HttpRequestException ex)
         {
+            ChatWindow.SendDebugMessage($"[ClaudeAI] HttpRequestException: {ex.Message}");
             throw new System.Exception($"Network error: {ex.Message}");
         }
         catch (JsonException ex)
         {
+            ChatWindow.SendDebugMessage($"[ClaudeAI] JsonException: {ex.Message}");
             throw new System.Exception($"Error parsing response: {ex.Message}");
         }
         catch (System.Exception ex)
         {
+            ChatWindow.SendDebugMessage($"[ClaudeAI] Unexpected error: {ex.Message}");
             Debug.LogError($"[ClaudeAI] Unexpected error: {ex.Message}");
             throw;
         }
@@ -227,8 +253,40 @@ public class ClaudeAIAgent
                             var startEvent = JsonConvert.DeserializeObject<ContentBlockStartEvent>(data);
                             contentBlocks.Add(startEvent.content_block);
                             
+                            ChatWindow.SendDebugMessage($"Content block start: type={startEvent.content_block.type}");
+                            
                             if (startEvent.content_block.type == "tool_use")
                             {
+                                ChatWindow.SendDebugMessage($"Tool_use block detected: {startEvent.content_block.name} (id: {startEvent.content_block.id})");
+                                
+                                // Provide immediate feedback about tool preparation
+                                onTextDelta?.Invoke($"\n\n🛠️ **Preparing to execute:** `{startEvent.content_block.name}`");
+                                
+                                // Track timing for progress updates
+                                var toolKey = $"{startEvent.content_block.name}_{startEvent.content_block.id}";
+                                toolStartTimes[toolKey] = DateTime.Now;
+                                
+                                // Show specific feedback for script tools and start progress timer
+                                if (IsScriptTool(startEvent.content_block.name))
+                                {
+                                    onTextDelta?.Invoke($"\n📝 **Generating script content...**");
+                                    
+                                    // Start a timer to show progress every 5 seconds
+                                    var timer = new System.Threading.Timer((_) => {
+                                        if (toolStartTimes.ContainsKey(toolKey))
+                                        {
+                                            var elapsed = DateTime.Now - toolStartTimes[toolKey];
+                                            onTextDelta?.Invoke($"\n⏳ **Still generating... ({elapsed.Seconds}s)**");
+                                        }
+                                    }, null, 5000, 5000); // Start after 5s, repeat every 3s
+                                    
+                                    progressTimers[toolKey] = timer;
+                                }
+                                else
+                                {
+                                    onTextDelta?.Invoke($"\n📋 **Building parameters...**");
+                                }
+                                
                                 var toolUse = new ClaudeToolUse
                                 {
                                     id = startEvent.content_block.id,
@@ -262,6 +320,21 @@ public class ClaudeAIAgent
 
         if (toolUses.Count > 0)
         {
+            // Stop all progress timers
+            foreach (var timer in progressTimers.Values)
+            {
+                timer?.Dispose();
+            }
+            progressTimers.Clear();
+            toolStartTimes.Clear();
+            
+            // Close any open code blocks from streaming
+            if (previousToolContent.Count > 0)
+            {
+                onTextDelta?.Invoke("\n```\n");
+                previousToolContent.Clear();
+            }
+            
             // Immediate feedback that tool execution is about to begin
             onTextDelta?.Invoke($"\n\n🛠️ **Starting tool execution** ({toolUses.Count} tool{(toolUses.Count > 1 ? "s" : "")} to execute)...");
             return await ProcessToolUsesAndContinueConversation(toolUses, fullResponse.ToString(), stopReason, onTextDelta, originalMessages, cancellationToken);
@@ -314,18 +387,21 @@ public class ClaudeAIAgent
         });
         
         Debug.Log($"[ClaudeAI] About to execute {toolUses.Count} tools");
+        ChatWindow.SendDebugMessage($"About to execute {toolUses.Count} tools");
 
         // Execute tools with detailed feedback
         for (int i = 0; i < toolUses.Count; i++)
         {
             var toolUse = toolUses[i];
             
+            ChatWindow.SendDebugMessage($"Executing tool {i+1}/{toolUses.Count}: {toolUse.name}");
+            
             try
             {
                 // Show tool execution start with more context
                 onTextDelta?.Invoke($"\n🔧 **Executing {toolUse.name}**");
                 
-                // Show tool parameters if available
+                // Show detailed tool parameters, especially for script tools
                 if (toolUse.input != null)
                 {
                     try
@@ -334,9 +410,16 @@ public class ClaudeAIAgent
                         var inputDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(inputJson);
                         if (inputDict != null && inputDict.Count > 0)
                         {
-                            var paramSummary = string.Join(", ", inputDict.Take(3).Select(kvp => $"{kvp.Key}: {kvp.Value?.ToString()?.Substring(0, Math.Min(30, kvp.Value?.ToString()?.Length ?? 0))}"));
-                            if (inputDict.Count > 3) paramSummary += "...";
-                            onTextDelta?.Invoke($"\n   📝 Parameters: {paramSummary}");
+                            if (IsScriptTool(toolUse.name))
+                            {
+                                ShowDetailedScriptToolParameters(inputDict, onTextDelta);
+                            }
+                            else
+                            {
+                                var paramSummary = string.Join(", ", inputDict.Take(3).Select(kvp => $"{kvp.Key}: {kvp.Value?.ToString()?.Substring(0, Math.Min(30, kvp.Value?.ToString()?.Length ?? 0))}"));
+                                if (inputDict.Count > 3) paramSummary += "...";
+                                onTextDelta?.Invoke($"\n   📝 Parameters: {paramSummary}");
+                            }
                         }
                     }
                     catch
@@ -444,6 +527,101 @@ public class ClaudeAIAgent
         return await ProcessStreamingResponse(response, onTextDelta, conversationMessages, cancellationToken);
     }
 
+    private static bool IsScriptTool(string toolName)
+    {
+        return toolName.Contains("script") || toolName.Contains("create") || toolName.Contains("edit") || 
+               toolName.Contains("str_replace") || toolName.Contains("insert") || toolName.Contains("view");
+    }
+
+    private static string GetFilePathFromParameters(Dictionary<string, object> parameters)
+    {
+        foreach (var param in parameters)
+        {
+            switch (param.Key.ToLower())
+            {
+                case "filepath":
+                case "file_path":
+                case "path":
+                case "target_file":
+                    return param.Value?.ToString() ?? "";
+            }
+        }
+        return "";
+    }
+
+    private static void ShowDetailedScriptToolParameters(Dictionary<string, object> parameters, System.Action<string> onTextDelta)
+    {
+        onTextDelta?.Invoke($"\n   📝 **Final Parameters:**");
+        
+        foreach (var param in parameters)
+        {
+            var value = param.Value?.ToString() ?? "";
+            
+            switch (param.Key.ToLower())
+            {
+                case "filepath":
+                case "file_path":
+                case "path":
+                case "target_file":
+                    onTextDelta?.Invoke($"\n      📄 **File:** `{value}`");
+                    break;
+                    
+                case "content":
+                case "code":
+                case "new_string":
+                    var lines = value.Split('\n');
+                    var lineCount = lines.Length;
+                    var contentPreview = lineCount > 3 ? 
+                        string.Join("\n", lines.Take(3)) + $"\n      ... ({lineCount - 3} more lines)" :
+                        value;
+                    onTextDelta?.Invoke($"\n      ✏️ **Content:** ({lineCount} line{(lineCount == 1 ? "" : "s")})\n      ```\n{contentPreview}\n      ```");
+                    break;
+                    
+                case "old_string":
+                    if (value.Length > 100)
+                    {
+                        var replacePreview = value.Substring(0, 97) + "...";
+                        onTextDelta?.Invoke($"\n      🔍 **Replacing:** `{replacePreview}`");
+                    }
+                    else
+                    {
+                        onTextDelta?.Invoke($"\n      🔍 **Replacing:** `{value}`");
+                    }
+                    break;
+                    
+                case "line_number":
+                case "line":
+                    onTextDelta?.Invoke($"\n      📍 **Line:** {value}");
+                    break;
+                    
+                case "instructions":
+                case "description":
+                    if (value.Length > 80)
+                    {
+                        var instructionPreview = value.Substring(0, 77) + "...";
+                        onTextDelta?.Invoke($"\n      💡 **{param.Key}:** {instructionPreview}");
+                    }
+                    else
+                    {
+                        onTextDelta?.Invoke($"\n      💡 **{param.Key}:** {value}");
+                    }
+                    break;
+                    
+                default:
+                    if (value.Length > 50)
+                    {
+                        var defaultPreview = value.Substring(0, 47) + "...";
+                        onTextDelta?.Invoke($"\n      ⚙️ **{param.Key}:** {defaultPreview}");
+                    }
+                    else
+                    {
+                        onTextDelta?.Invoke($"\n      ⚙️ **{param.Key}:** {value}");
+                    }
+                    break;
+            }
+        }
+    }
+
     private static async Task ProcessContentBlockDelta(ContentBlockDeltaEvent delta, List<ClaudeContentBlock> contentBlocks, List<ClaudeToolUse> toolUses, System.Action<string> onTextDelta, StringBuilder fullResponse)
     {
         if (delta.index < 0 || delta.index >= contentBlocks.Count)
@@ -491,6 +669,8 @@ public class ClaudeAIAgent
                                 };
                                 toolUses.Add(toolUse);
                             }
+                            
+                            // No complex streaming - just let the timer handle progress
                         }
                     }
                     catch (JsonException)

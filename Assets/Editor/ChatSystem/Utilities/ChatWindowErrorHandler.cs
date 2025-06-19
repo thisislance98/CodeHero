@@ -75,7 +75,7 @@ public class ChatWindowErrorHandler
             string statusMessage = aiEnabled ? 
                 $"{errorSummary} - attempting automatic fix..." :
                 $"{errorSummary} (Auto Fix disabled)";
-            addMessageCallback(new ChatMessage("System", statusMessage, MessageType.Error));
+            addMessageCallback(ChatMessage.CreateSystemMessage(statusMessage, MessageType.Error));
             
             if (aiEnabled)
             {
@@ -220,7 +220,7 @@ public class ChatWindowErrorHandler
                 "🔧 Analyzing errors with AI..." : 
                 $"🔧 Analyzing remaining errors (attempt {errorFixAttempts}/{MAX_ERROR_FIX_ATTEMPTS})...";
                 
-            currentAnalyzingMessage = new ChatMessage("Claude", "", MessageType.Normal);
+            currentAnalyzingMessage = ChatMessage.CreateStreamingMessage("Claude", MessageType.Normal);
             addMessageCallback(currentAnalyzingMessage);
             scrollToBottomCallback();
             repaintCallback();
@@ -275,13 +275,13 @@ public class ChatWindowErrorHandler
             {
                 removeMessageCallback(currentAnalyzingMessage, "Analyzing");
                 currentAnalyzingMessage = null;
-                addMessageCallback(new ChatMessage("System", "❌ Error: Claude AI returned empty response", MessageType.Error));
+                addMessageCallback(ChatMessage.CreateSystemMessage("❌ Error: Claude AI returned empty response", MessageType.Error));
                 
                 // Reset state since we're not continuing
                 HandleErrorFixingCompleted(false);
             }
             
-            suggestionSystem.UpdateSuggestions(true, messages);
+            suggestionSystem.UpdateSuggestions(true, messages, false);
             scrollToBottomCallback();
             repaintCallback();
         }
@@ -292,7 +292,7 @@ public class ChatWindowErrorHandler
             removeMessageCallback(currentAnalyzingMessage, "Analyzing");
             currentAnalyzingMessage = null;
             
-            addMessageCallback(new ChatMessage("System", $"❌ Error fix failed: {ex.Message}", MessageType.Error));
+            addMessageCallback(ChatMessage.CreateSystemMessage($"❌ Error fix failed: {ex.Message}", MessageType.Error));
             
             // Reset state since we're not continuing
             HandleErrorFixingCompleted(false);

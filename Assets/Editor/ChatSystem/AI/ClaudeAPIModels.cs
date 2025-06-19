@@ -2,6 +2,19 @@ using System.Collections.Generic;
 using Newtonsoft.Json;
 
 [System.Serializable]
+public class ClaudeUsage
+{
+    public int input_tokens;
+    public int output_tokens;
+    
+    public ClaudeUsage()
+    {
+        input_tokens = 0;
+        output_tokens = 0;
+    }
+}
+
+[System.Serializable]
 public class ClaudeMessage
 {
     public string role;
@@ -107,6 +120,9 @@ public class ClaudeResponse
     public string type;
     public string role;
     public List<ClaudeContentBlock> content;
+    
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public ClaudeUsage usage;
 }
 
 [System.Serializable]

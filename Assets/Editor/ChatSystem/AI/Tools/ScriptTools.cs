@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.Compilation;
 using System.Collections.Generic;
 using System;
 using System.Threading.Tasks;
@@ -53,12 +54,17 @@ public static class ScriptTools
         try
         {
             Debug.Log("[ClaudeAI] CreateScript: Starting script creation...");
+            ChatWindow.SendDebugMessage("CreateScript: Starting script creation...");
+            
+            // Notify ChatWindow that Claude is performing a script operation
+            ChatWindow.NotifyClaudeScriptOperationStarted();
             
             var scriptName = input["script_name"].ToString();
             var scriptContent = input["script_content"].ToString();
             var folderPath = input.ContainsKey("folder_path") ? input["folder_path"].ToString() : "Scripts";
             
             Debug.Log($"[ClaudeAI] CreateScript: Script name = '{scriptName}', folder = '{folderPath}'");
+            ChatWindow.SendDebugMessage($"CreateScript: Script name = '{scriptName}', folder = '{folderPath}'");
             
             // Step 1: Prepare directory
             var fullPath = Path.Combine(Application.dataPath, folderPath);
@@ -78,11 +84,13 @@ public static class ScriptTools
             if (File.Exists(filePath))
             {
                 Debug.Log($"[ClaudeAI] CreateScript: File already exists, skipping creation: {filePath}");
+                ChatWindow.SendDebugMessage($"CreateScript: File already exists, skipping creation: {filePath}");
                 return $"Script '{scriptName}.cs' already exists at {folderPath}/{scriptName}.cs";
             }
             
             File.WriteAllText(filePath, scriptContent);
             Debug.Log("[ClaudeAI] CreateScript: File written successfully");
+            ChatWindow.SendDebugMessage("CreateScript: File written successfully");
             
             // Step 3: Import asset
             var relativePath = Path.Combine("Assets", folderPath, $"{scriptName}.cs");
@@ -90,15 +98,65 @@ public static class ScriptTools
             AssetDatabase.ImportAsset(relativePath);
             Debug.Log("[ClaudeAI] CreateScript: Asset import completed");
             
+            // Step 4: Request compilation with multiple strategies for reliability
+            Debug.Log("[ClaudeAI] CreateScript: Requesting Unity compilation...");
+            ChatWindow.SendDebugMessage("⏳ Waiting for compilation...");
+            
+            // Strategy 1: Refresh asset database first
+            AssetDatabase.Refresh();
+            ChatWindow.SendDebugMessage("AssetDatabase.Refresh() completed");
+            
+            // Strategy 2: Use delayed calls to ensure file system changes are detected
+            EditorApplication.delayCall += () =>
+            {
+                // Try regular RequestScriptCompilation first (faster incremental compilation)
+                CompilationPipeline.RequestScriptCompilation();
+                ChatWindow.SendDebugMessage("CompilationPipeline.RequestScriptCompilation() called");
+                
+                // Check compilation status after a brief delay
+                EditorApplication.delayCall += () =>
+                {
+                    bool isCompiling = EditorApplication.isCompiling;
+                    ChatWindow.SendDebugMessage($"EditorApplication.isCompiling after regular request: {isCompiling}");
+                    
+                    // Strategy 3: Fallback to CleanBuildCache if regular compilation didn't start
+                    if (!isCompiling)
+                    {
+                        ChatWindow.SendDebugMessage("Regular compilation not started, trying CleanBuildCache as fallback...");
+                        CompilationPipeline.RequestScriptCompilation(RequestScriptCompilationOptions.CleanBuildCache);
+                        ChatWindow.SendDebugMessage("CompilationPipeline.RequestScriptCompilation(CleanBuildCache) called as fallback");
+                        
+                        // Final check
+                        EditorApplication.delayCall += () =>
+                        {
+                            bool finalCompiling = EditorApplication.isCompiling;
+                            ChatWindow.SendDebugMessage($"Final compilation check after fallback: {finalCompiling}");
+                            
+                            if (!finalCompiling)
+                            {
+                                ChatWindow.SendDebugMessage("⚠️ Warning: Neither compilation method triggered. Unity might not detect changes yet.");
+                            }
+                        };
+                    }
+                };
+            };
+            
+            Debug.Log("[ClaudeAI] CreateScript: Compilation requested");
+            
             // Return immediate success message with file details
             var scriptSize = scriptContent.Length;
             var lineCount = scriptContent.Split('\n').Length;
             var immediateResult = $"Script '{scriptName}.cs' created successfully!\n" +
                                 $"📁 Location: {folderPath}/{scriptName}.cs\n" +
                                 $"📝 Size: {scriptSize} characters, {lineCount} lines\n" +
-                                $"🔄 Unity will compile automatically";
+                                $"🔄 Compilation requested";
             
             Debug.Log($"[ClaudeAI] CreateScript: Returning immediate result: {immediateResult}");
+            ChatWindow.SendDebugMessage($"CreateScript: Returning result: {immediateResult}");
+            
+            // Notify ChatWindow that Claude's script operation is completed
+            ChatWindow.NotifyClaudeScriptOperationCompleted();
+            
             return immediateResult;
         }
         catch (Exception ex)

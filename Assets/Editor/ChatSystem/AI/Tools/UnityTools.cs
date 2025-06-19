@@ -41,9 +41,13 @@ public static class UnityTools
         {
             Debug.Log($"[ClaudeAI] Executing tool: {toolUse?.name ?? "NULL"}");
             
+            // Send debug message to chat window that persists
+            ChatWindow.SendDebugMessage($"Tool execution started: {toolUse?.name ?? "NULL"}");
+            
             if (toolUse == null)
             {
                 Debug.LogError("[ClaudeAI] toolUse is null!");
+                ChatWindow.SendDebugMessage("ERROR: toolUse is null!");
                 return "Error: Tool use object is null";
             }
             
@@ -62,7 +66,10 @@ public static class UnityTools
                 // Script tools
                 case "create_script":
                     Debug.Log("[ClaudeAI] Delegating to ScriptTools");
-                    return ScriptTools.ExecuteScriptTool(toolUse);
+                    ChatWindow.SendDebugMessage("Delegating create_script to ScriptTools");
+                    var scriptResult = ScriptTools.ExecuteScriptTool(toolUse);
+                    ChatWindow.SendDebugMessage($"ScriptTools returned: {scriptResult?.Substring(0, Math.Min(100, scriptResult?.Length ?? 0))}...");
+                    return scriptResult;
                     
                 // GameObject tools
                 case "create_gameobject":

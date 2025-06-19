@@ -11,16 +11,22 @@ public class ChatSuggestionSystem
     
     public string[] CurrentSuggestions => currentSuggestions;
     
-    public void UpdateSuggestions(bool aiEnabled, List<ChatMessage> messages)
+    public void UpdateSuggestions(bool aiEnabled, List<ChatMessage> messages, bool isStreaming = false)
     {
         List<string> suggestions = new List<string>();
+        
+        // If streaming, prioritize stop button
+        if (isStreaming)
+        {
+            suggestions.Add("⏹️ Stop streaming");
+        }
         
         // Base suggestions always available
         if (aiEnabled)
         {
             suggestions.AddRange(new string[]
             {
-                "Create a sample script",
+                "Create a sample hello worldscript ",
                 "Create a cube",
                 "Create a sphere", 
                 "List all GameObjects",

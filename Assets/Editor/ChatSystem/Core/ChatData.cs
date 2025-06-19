@@ -15,15 +15,75 @@ public class ChatMessage
     public bool isStreaming;
     public bool isComplete;
     
-    public ChatMessage(string user, string msg, MessageType msgType = MessageType.Normal, bool streamingMode = false)
+    // Token usage tracking
+    public TokenUsageData tokenUsage;
+    
+    public ChatMessage()
     {
-        id = System.Guid.NewGuid().ToString();
-        username = user;
-        message = msg;
+        id = Guid.NewGuid().ToString();
         timestamp = DateTime.Now.ToString("HH:mm:ss");
-        type = msgType;
-        isStreaming = streamingMode;
-        isComplete = !streamingMode;
+        type = MessageType.Normal;
+        isStreaming = false;
+        isComplete = true;
+        tokenUsage = null;
+    }
+    
+    public static ChatMessage CreateUserMessage(string username, string message)
+    {
+        return new ChatMessage
+        {
+            id = Guid.NewGuid().ToString(),
+            username = username,
+            message = message,
+            timestamp = DateTime.Now.ToString("HH:mm:ss"),
+            type = MessageType.Normal,
+            isStreaming = false,
+            isComplete = true
+        };
+    }
+    
+    public static ChatMessage CreateSystemMessage(string message, MessageType type = MessageType.System)
+    {
+        return new ChatMessage
+        {
+            id = Guid.NewGuid().ToString(),
+            username = "System",
+            message = message,
+            timestamp = DateTime.Now.ToString("HH:mm:ss"),
+            type = type,
+            isStreaming = false,
+            isComplete = true
+        };
+    }
+    
+    public static ChatMessage CreateStreamingMessage(string username, MessageType type = MessageType.Normal)
+    {
+        return new ChatMessage
+        {
+            id = Guid.NewGuid().ToString(),
+            username = username,
+            message = "",
+            timestamp = DateTime.Now.ToString("HH:mm:ss"),
+            type = type,
+            isStreaming = true,
+            isComplete = false
+        };
+    }
+    
+    public void SetTokenUsage(TokenUsageData usage)
+    {
+        tokenUsage = usage;
+    }
+    
+    public bool HasTokenUsage()
+    {
+        return tokenUsage != null && (tokenUsage.inputTokens > 0 || tokenUsage.outputTokens > 0);
+    }
+    
+    public string GetTokenUsageSummary()
+    {
+        if (!HasTokenUsage()) return "";
+        return tokenUsage.GetUsageSummary();
     }
     
     // Method to append text during streaming

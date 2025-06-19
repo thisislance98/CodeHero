@@ -27,6 +27,13 @@ public class MessageDeltaEvent : StreamEvent
 }
 
 [System.Serializable]
+public class MessageStopEvent : StreamEvent
+{
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public ClaudeUsage usage;
+}
+
+[System.Serializable]
 public class StreamErrorEvent : StreamEvent
 {
     public StreamError error;
